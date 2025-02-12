@@ -1,8 +1,8 @@
 package web
 
-import "testing"
+import "net/http"
 
-func TestServerConn(t *testing.T) {
-	srv := &HTTPServer{}
-	srv.Start(":8080")
+type Context struct {
+	Request   *http.Request
+	ResWriter http.ResponseWriter
 }

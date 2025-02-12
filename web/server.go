@@ -41,3 +41,9 @@ func (s *HTTPServer) Shutdown(ctx context.Context) error {
 	}
 	return nil
 }
+
+type HandlerFunc func(ctx *Context)
+
+func (s *HTTPServer) AddHandler(method string, path string, handlerFunc HandlerFunc) {
+
+}
