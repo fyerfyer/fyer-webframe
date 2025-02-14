@@ -1,6 +1,7 @@
 package web
 
 import (
+	"regexp"
 	"strings"
 )
 
@@ -18,6 +19,9 @@ type node struct {
 	hasParamChild bool
 	hasStarChild  bool
 	Param         map[string]string
+	// Add regex related fields
+	isRegex      bool
+	regexPattern *regexp.Regexp
 }
 
 func NewRouter() *Router {
@@ -80,8 +84,24 @@ func (r *Router) addHandler(method string, path string, handlerFunc HandlerFunc)
 
 		// 创建子节点，然后进入下一级
 		isParam := false
+		isRegex := false
+		var regexPattern *regexp.Regexp
+
 		if segment[0] == ':' {
 			segment = segment[1:]
+			// 检查是否为参数路径
+			if strings.Contains(segment, "(") && strings.HasSuffix(segment, ")") {
+				isRegex = true
+				// 解析正则表达式
+				parts := strings.SplitN(segment, "(", 2)
+				segment = parts[0]
+				pattern := parts[1][:len(parts[1])-1] // 去掉后缀')'
+				var err error
+				regexPattern, err = regexp.Compile(pattern)
+				if err != nil {
+					panic("invalid regex pattern: " + err.Error())
+				}
+			}
 			isParam = true
 
 			// 参数路径和通配符不能同时存在
@@ -92,9 +112,11 @@ func (r *Router) addHandler(method string, path string, handlerFunc HandlerFunc)
 			root.hasParamChild = true
 		}
 
-		root.createChild(segment)
+		root.createChild(segment, isRegex, regexPattern)
 		root = root.children[segment]
 		root.isParam = isParam
+		root.isRegex = isRegex
+		root.regexPattern = regexPattern
 	}
 
 	// 最后一个节点设置 handler
@@ -144,21 +166,27 @@ func (r *Router) findHandler(method string, path string, ctx *Context) (*node, b
 	remainingSegments := segments
 	var matchParamNode func(root *node, segments []string, tempCtx *Context) (*node, bool)
 	matchParamNode = func(root *node, segments []string, tempCtx *Context) (*node, bool) {
+		// 1. 检查是否到达路径末端
 		if len(segments) == 0 {
-			return root, true
+			// 只有当前节点有handler时才算匹配成功
+			if root.handler != nil {
+				return root, true
+			}
+			return nil, false
 		}
 
 		segment := segments[0]
 		staticNode, wildcardNode, paramNodes, staticOK, wildcardOK, paramOK := root.findChild(segment)
 
-		// 优先尝试静态匹配
+		// 2. 优先尝试静态匹配
 		if staticOK {
-			return matchParamNode(staticNode, segments[1:], tempCtx)
+			if node, ok := matchParamNode(staticNode, segments[1:], tempCtx); ok {
+				return node, true
+			}
 		}
 
-		// 尝试参数匹配
+		// 3. 尝试参数匹配
 		if paramOK {
-			// 对每个参数节点尝试匹配
 			for _, paramNode := range paramNodes {
 				newTempCtx := &Context{Param: make(map[string]string)}
 				for k, v := range tempCtx.Param {
@@ -176,9 +204,9 @@ func (r *Router) findHandler(method string, path string, ctx *Context) (*node, b
 			}
 		}
 
-		// 如果有通配符匹配，保存但继续尝试其他匹配
-		if wildcardOK {
-			wildcard = wildcardNode
+		// 4. 如果有通配符匹配且已经到达路径末端
+		if wildcardOK && len(segments) == 1 {
+			return wildcardNode, true
 		}
 
 		return nil, false
@@ -193,10 +221,10 @@ func (r *Router) findHandler(method string, path string, ctx *Context) (*node, b
 		return node, true
 	}
 
-	return wildcard, wildcard != nil
+	return wildcard, false
 }
 
-func (n *node) createChild(path string) {
+func (n *node) createChild(path string, isRegex bool, pattern *regexp.Regexp) {
 	if n.children == nil {
 		n.children = make(map[string]*node)
 	}
@@ -216,6 +244,8 @@ func (n *node) createChild(path string) {
 			path:         path,
 			hasStarParam: isStar,
 			parent:       n,
+			isRegex:      isRegex,
+			regexPattern: pattern,
 		}
 	}
 }
@@ -228,6 +258,22 @@ func (n *node) findChild(path string) (*node, *node, []*node, bool, bool, bool) 
 	staticNode, staticOK := n.children[path]
 	wildcardNode, wildcardOK := n.children["*"]
 	paramNodes, paramOK, _ := n.getParamChild()
+
+	// 筛选参数节点，只包括那些匹配正则表达式模式的节点
+	if paramOK {
+		var matchingParamNodes []*node
+		for _, paramNode := range paramNodes {
+			if paramNode.isRegex {
+				if paramNode.regexPattern.MatchString(path) {
+					matchingParamNodes = append(matchingParamNodes, paramNode)
+				}
+			} else {
+				matchingParamNodes = append(matchingParamNodes, paramNode)
+			}
+		}
+		paramNodes = matchingParamNodes
+		paramOK = len(paramNodes) > 0
+	}
 
 	return staticNode, wildcardNode, paramNodes, staticOK, wildcardOK, paramOK
 }
@@ -244,7 +290,9 @@ func (n *node) getParamChild() ([]*node, bool, bool) {
 		if child.isParam {
 			paramNodes = append(paramNodes, child)
 			hasParamChild = true
-			hasParamHandler = child.handler != nil
+			if child.handler != nil {
+				hasParamHandler = true
+			}
 		}
 	}
 

@@ -1,4 +1,4 @@
-module fyer-webframe
+module github.com/fyerfyer/fyer-webframe
 
 go 1.23.5
 
