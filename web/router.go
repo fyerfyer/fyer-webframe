@@ -10,24 +10,218 @@ type Router struct {
 }
 
 type node struct {
-	path          string
-	children      map[string]*node
-	parent        *node
-	handler       HandlerFunc
-	hasStarParam  bool
-	isParam       bool
-	hasParamChild bool
-	hasStarChild  bool
-	Param         map[string]string
-	// Add regex related fields
-	isRegex      bool
-	regexPattern *regexp.Regexp
+	path                string
+	children            map[string]*node
+	parent              *node
+	handler             HandlerFunc
+	hasStarParam        bool
+	isParam             bool
+	hasParamChild       bool
+	hasStarChild        bool
+	Param               map[string]string
+	isRegex             bool
+	regexPattern        *regexp.Regexp
+	routeURL            string
+	staticMiddlewares   []Middleware
+	regexMiddlewares    []Middleware
+	paramMiddlewares    []Middleware
+	wildcardMiddlewares []Middleware
 }
 
 func NewRouter() *Router {
 	return &Router{
 		routerTrees: make(map[string]*node),
 	}
+}
+
+func (r *Router) Use(method string, path string, m Middleware) {
+	// 首先检查路由树是否存在
+	_, ok := r.routerTrees[method]
+	if !ok {
+		panic("method not found")
+	}
+
+	// 查找所有可能匹配的节点
+	matchedNodes := r.findMatchedNodes(method, path)
+	if len(matchedNodes) == 0 {
+		panic("no routes match this middleware path")
+	}
+
+	// 根据路由类型和路径将中间件添加到对应的中间件组
+	for _, n := range matchedNodes {
+		// 处理通配符路径
+		if path == "/*" || strings.Contains(path, "/*") {
+			n.wildcardMiddlewares = append(n.wildcardMiddlewares, m)
+		} else if strings.Contains(path, ":") {
+			// 处理参数路径和正则路由
+			if strings.Contains(path, "(") && strings.HasSuffix(path[strings.Index(path, "("):], ")") {
+				// 正则路由
+				n.regexMiddlewares = append(n.regexMiddlewares, m)
+			} else {
+				// 普通参数路由
+				n.paramMiddlewares = append(n.paramMiddlewares, m)
+			}
+		} else {
+			// 处理静态路径
+			n.staticMiddlewares = append(n.staticMiddlewares, m)
+		}
+	}
+}
+
+func (r *Router) findMatchedNodes(method string, path string) []*node {
+	var matched []*node
+	root := r.routerTrees[method]
+
+	// 处理根路径特殊情况
+	if path == "/" {
+		if root.handler != nil {
+			matched = append(matched, root)
+		}
+		return matched
+	}
+
+	// 标准路径处理
+	path = path[1:]
+	segments := strings.Split(path, "/")
+
+	var findMatched func(*node, []string)
+	findMatched = func(n *node, segments []string) {
+		// 如果到达路径末端
+		if len(segments) == 0 {
+			if n.handler != nil {
+				matched = append(matched, n)
+			}
+			return
+		}
+
+		segment := segments[0]
+
+		// 处理通配符路径
+		if segment == "*" {
+			// 遍历父节点的所有子节点，因为通配符可以匹配任何路径，则只要是父节点的子节点就可以匹配
+			children := r.getChildren(n.parent)
+			for _, child := range children {
+				if child.handler != nil {
+					matched = append(matched, child)
+				}
+			}
+			return
+		}
+
+		// 处理参数路径
+		// 这里处理的情况是：中间件路由和查找节点路由都是参数路由的格式
+		// 中间件路由为参数路由、查找结点路由为具体的字符串的这一情况在后面讨论
+		if segment[0] == ':' {
+			// 遍历父节点的所有子节点，参数路径这一段子节点可以忽略，但是其他的部分还要继续匹配
+			paramSegment := segment
+			children := r.getChildren(n.parent)
+			for _, child := range children {
+				// 首先先检验是否为正则匹配，如果有正则匹配的话要确保匹配成功
+				// 判断正则路由格式是否正确
+				hasLeftParenthesis := strings.Contains(paramSegment, "(")
+				hasRightParenthesis := strings.HasSuffix(paramSegment, ")")
+				middleHasRegex := hasLeftParenthesis || hasRightParenthesis
+
+				// 如果中间件路由是带有正则表达式的，那么当前节点必须包含相同的正则表达式才能匹配
+				if middleHasRegex && !child.isRegex {
+					continue
+				}
+
+				if middleHasRegex {
+					if hasLeftParenthesis != hasRightParenthesis {
+						panic("invalid regex pattern: should start with '(' and end with ')'")
+					}
+
+					parts := strings.SplitN(paramSegment, "(", 2)
+					paramSegment = parts[0][1:]
+					pattern := parts[1][:len(parts[1])-1]
+
+					// 判断正则表达式是否合法
+					if !child.regexPattern.MatchString(pattern) {
+						continue
+					}
+				}
+
+				if child.handler != nil {
+					matched = append(matched, child)
+				}
+
+				if child.children != nil {
+					for _, c := range child.children {
+						findMatched(c, segments[1:])
+					}
+				}
+			}
+		} else {
+			// 查找结点路由为具体的字符串的情况
+			if paramNodes, ok, _ := n.getParamChild(); ok {
+				for _, paramNode := range paramNodes {
+					if paramNode.isRegex {
+						if paramNode.regexPattern.MatchString(segment) {
+							findMatched(paramNode, segments[1:])
+						}
+					} else {
+						findMatched(paramNode, segments[1:])
+					}
+				}
+			}
+		}
+
+		// 检查静态匹配
+		if child, ok := n.children[segment]; ok {
+			findMatched(child, segments[1:])
+		}
+
+		// 检查通配符匹配
+		if wildcardNode, ok := n.children["*"]; ok {
+			if wildcardNode.handler != nil {
+				matched = append(matched, wildcardNode)
+			}
+		}
+	}
+
+	findMatched(root, segments)
+	return matched
+}
+
+func (r *Router) getChildren(n *node) []*node {
+	var children []*node
+	if n.children == nil {
+		return nil
+	}
+	for _, child := range n.children {
+		if child.handler != nil {
+			children = append(children, child)
+		}
+		if nodes := r.getChildren(child); nodes != nil {
+			children = append(children, nodes...)
+		}
+	}
+	return children
+}
+
+func (r *Router) Get(path string, handlerFunc HandlerFunc) {
+	r.addHandler("GET", path, handlerFunc)
+}
+
+func (r *Router) Post(path string, handlerFunc HandlerFunc) {
+	r.addHandler("POST", path, handlerFunc)
+}
+
+func (r *Router) Put(path string, handlerFunc HandlerFunc) {
+	r.addHandler("PUT", path, handlerFunc)
+}
+
+func (r *Router) Delete(path string, handlerFunc HandlerFunc) {
+	r.addHandler("DELETE", path, handlerFunc)
+}
+
+func (r *Router) Patch(path string, handlerFunc HandlerFunc) {
+	r.addHandler("PATCH", path, handlerFunc)
+}
+
+func (r *Router) Options(path string, handlerFunc HandlerFunc) {
+	r.addHandler("OPTIONS", path, handlerFunc)
 }
 
 func (r *Router) addHandler(method string, path string, handlerFunc HandlerFunc) {
@@ -130,6 +324,7 @@ func (r *Router) addHandler(method string, path string, handlerFunc HandlerFunc)
 	}
 
 	root.handler = handlerFunc
+	root.routeURL = path
 	return
 }
 

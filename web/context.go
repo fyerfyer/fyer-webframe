@@ -27,21 +27,15 @@ type StringValue struct {
 }
 
 func (c *Context) FormValue(key string) StringValue {
-	if err := c.Req.ParseForm(); err != nil {
-		return StringValue{
-			Error: err,
-		}
-	}
-
-	val, ok := c.Req.Form[key]
-	if !ok {
+	val := c.Req.FormValue(key)
+	if val == "" {
 		return StringValue{
 			Error: errors.New("key not found"),
 		}
 	}
 
 	return StringValue{
-		Value: val[0],
+		Value: val,
 	}
 }
 
@@ -56,4 +50,12 @@ func (c *Context) PathParam(key string) StringValue {
 	return StringValue{
 		Value: val,
 	}
+}
+
+func (c *Context) JSON(code int, v any) error {
+	c.Resp.Header().Set("Content-Type", "application/json")
+	c.Resp.WriteHeader(code)
+
+	encoder := json.NewEncoder(c.Resp)
+	return encoder.Encode(v)
 }

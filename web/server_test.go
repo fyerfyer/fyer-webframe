@@ -3,30 +3,44 @@ package web
 import (
 	"context"
 	"github.com/stretchr/testify/assert"
-	"net"
 	"net/http"
 	"testing"
 	"time"
 )
 
 func TestServer(t *testing.T) {
-	srv := &HTTPServer{}
+	s := NewHTTPServer()
 
-	listener, err := net.Listen("tcp", "127.0.0.1:8080")
-	assert.NoError(t, err, "should be able to get a free port")
-	addr := listener.Addr().String()
-	listener.Close()
+	t.Run("server basic functionality", func(t *testing.T) {
+		// 测试路由注册
+		s.Get("/", func(ctx *Context) {
+			ctx.Resp.Write([]byte("hello"))
+		})
 
-	go func() {
-		_ = srv.Start(addr)
-	}()
+		// 测试 404
+		s.Get("/user", func(ctx *Context) {
+			ctx.Resp.Write([]byte("user"))
+		})
 
-	time.Sleep(200 * time.Millisecond)
+		// 启动服务器
+		go func() {
+			err := s.Start(":8081")
+			assert.NoError(t, err)
+		}()
 
-	resp, err := http.Get("http://" + addr)
-	assert.NoError(t, err, "should be able to send request")
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "server should respond with 200")
+		time.Sleep(time.Second) // 等待服务器启动
 
-	err = srv.Shutdown(context.Background())
-	assert.NoError(t, err, "server should shutdown without error")
+		// 发送请求测试
+		resp, err := http.Get("http://localhost:8081/")
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		resp, err = http.Get("http://localhost:8081/not-exist")
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+		// 测试关闭
+		err = s.Shutdown(context.Background())
+		assert.NoError(t, err)
+	})
 }
