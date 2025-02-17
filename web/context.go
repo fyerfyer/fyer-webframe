@@ -7,9 +7,10 @@ import (
 )
 
 type Context struct {
-	Req   *http.Request
-	Resp  http.ResponseWriter
-	Param map[string]string
+	Req      *http.Request
+	Resp     http.ResponseWriter
+	Param    map[string]string
+	RouteURL string
 }
 
 func (c *Context) BindJSON(v any) error {

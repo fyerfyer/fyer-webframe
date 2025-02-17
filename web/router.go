@@ -21,7 +21,6 @@ type node struct {
 	Param               map[string]string
 	isRegex             bool
 	regexPattern        *regexp.Regexp
-	routeURL            string
 	staticMiddlewares   []Middleware
 	regexMiddlewares    []Middleware
 	paramMiddlewares    []Middleware
@@ -324,7 +323,6 @@ func (r *Router) addHandler(method string, path string, handlerFunc HandlerFunc)
 	}
 
 	root.handler = handlerFunc
-	root.routeURL = path
 	return
 }
 
@@ -404,6 +402,7 @@ func (r *Router) findHandler(method string, path string, ctx *Context) (*node, b
 			return wildcardNode, true
 		}
 
+		ctx.routeURL = path
 		return nil, false
 	}
 
