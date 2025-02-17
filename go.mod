@@ -3,6 +3,7 @@ module github.com/fyerfyer/fyer-webframe
 go 1.23.5
 
 require (
+	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/prometheus/client_golang v1.20.5
 	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/otel v1.34.0
