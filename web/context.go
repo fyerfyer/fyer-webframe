@@ -11,9 +11,10 @@ type Context struct {
 	Resp           http.ResponseWriter
 	Param          map[string]string
 	RouteURL       string
-	RespStatusCode int    // HTTP响应状态码
-	RespData       []byte // 响应数据
-	handled        bool   // 标记响应是否已经被处理
+	RespStatusCode int
+	RespData       []byte
+	unhandled      bool
+	tplEngine      Template // 新增模板引擎字段
 }
 
 func (c *Context) BindJSON(v any) error {
@@ -76,7 +77,7 @@ func (c *Context) RespJSON(code int, val any) error {
 
 	c.RespStatusCode = code
 	c.RespData = data
-	c.handled = true
+	c.unhandled = true
 	return nil
 }
 
@@ -84,14 +85,30 @@ func (c *Context) RespJSON(code int, val any) error {
 func (c *Context) RespString(code int, str string) error {
 	c.RespStatusCode = code
 	c.RespData = []byte(str)
-	c.handled = true
+	c.unhandled = true
 	return nil
 }
 
-// RespData 返回字节数组响应
+// RespBytes 返回字节数组响应
 func (c *Context) RespBytes(code int, data []byte) error {
 	c.RespStatusCode = code
 	c.RespData = data
-	c.handled = true
+	c.unhandled = true
+	return nil
+}
+
+// Render 渲染模板
+func (c *Context) Render(tplName string, data any) error {
+	if c.tplEngine == nil {
+		return errors.New("template engine not found")
+	}
+
+	data, err := c.tplEngine.Render(c, tplName, data)
+	if err != nil {
+		return err
+	}
+
+	c.RespData = data.([]byte)
+	c.unhandled = true
 	return nil
 }

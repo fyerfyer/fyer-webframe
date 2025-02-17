@@ -30,15 +30,22 @@ type HTTPServer struct {
 	noRouter  HandlerFunc  // 404处理器
 	server    *http.Server // 底层的http server
 	baseRoute string       // 基础路由前缀
+	tplEngine Template     // 模板引擎
 }
 
 // ServerOption 定义服务器选项
 type ServerOption func(*HTTPServer)
 
 // WithReadTimeout 设置读取超时
-func WithReadTimeout(timeout time.Duration) ServerOption {
+func (s *HTTPServer) WithReadTimeout(timeout time.Duration) ServerOption {
 	return func(server *HTTPServer) {
 		server.server.ReadTimeout = timeout
+	}
+}
+
+func WithTemplate(tpl Template) ServerOption {
+	return func(server *HTTPServer) {
+		server.tplEngine = tpl
 	}
 }
 
@@ -87,9 +94,10 @@ func NewHTTPServer(opts ...ServerOption) *HTTPServer {
 // ServeHTTP HTTPServer的核心处理函数
 func (s *HTTPServer) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	ctx := &Context{
-		Req:   req,
-		Resp:  res,
-		Param: make(map[string]string),
+		Req:       req,
+		Resp:      res,
+		Param:     make(map[string]string),
+		tplEngine: s.tplEngine,
 	}
 
 	// 如果设置了基础路径，需要处理路径前缀
@@ -121,7 +129,7 @@ func (s *HTTPServer) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 // handleResponse 统一处理响应
 func (s *HTTPServer) handleResponse(ctx *Context) {
 	// 如果已经直接操作了ResponseWriter，就不再进行处理
-	if !ctx.handled {
+	if !ctx.unhandled {
 		return
 	}
 

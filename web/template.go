@@ -20,23 +20,23 @@ type GoTemplate struct {
 	tpl        *template.Template // 已编译的模板
 }
 
-type TemplateOption func(*GoTemplate)
+type GoTemplateOption func(*GoTemplate)
 
 // WithPattern 设置模板文件匹配模式
-func WithPattern(pattern string) TemplateOption {
+func WithPattern(pattern string) GoTemplateOption {
 	return func(t *GoTemplate) {
 		t.tplPattern = pattern
 	}
 }
 
 // WithFiles 设置模板文件列表
-func WithFiles(files ...string) TemplateOption {
+func WithFiles(files ...string) GoTemplateOption {
 	return func(t *GoTemplate) {
 		t.tplFiles = files
 	}
 }
 
-func NewGoTemplate(opts ...TemplateOption) *GoTemplate {
+func NewGoTemplate(opts ...GoTemplateOption) *GoTemplate {
 	t := &GoTemplate{
 		tpl: template.New(""),
 	}
