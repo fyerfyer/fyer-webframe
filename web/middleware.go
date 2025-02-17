@@ -4,6 +4,8 @@ type Middleware func(HandlerFunc) HandlerFunc
 
 // BuildChain 构建中间件执行链，按照静态->正则->参数->通配符的顺序
 func BuildChain(n *node, handler HandlerFunc) HandlerFunc {
+	// 添加Resp写回中间件
+
 	// 通配符中间件（最后执行）
 	for i := len(n.wildcardMiddlewares) - 1; i >= 0; i-- {
 		handler = n.wildcardMiddlewares[i](handler)

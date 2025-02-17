@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"log"
 	"net"
 	"net/http"
 	"time"
@@ -112,6 +113,30 @@ func (s *HTTPServer) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	// 构建并执行处理链
 	handler := BuildChain(node, node.handler)
 	handler(ctx)
+
+	// 处理响应
+	s.handleResponse(ctx)
+}
+
+// handleResponse 统一处理响应
+func (s *HTTPServer) handleResponse(ctx *Context) {
+	// 如果已经直接操作了ResponseWriter，就不再进行处理
+	if !ctx.handled {
+		return
+	}
+
+	// 设置状态码（如果有）
+	if ctx.RespStatusCode > 0 {
+		ctx.Resp.WriteHeader(ctx.RespStatusCode)
+	}
+
+	// 写入响应数据（如果有）
+	if len(ctx.RespData) > 0 {
+		_, err := ctx.Resp.Write(ctx.RespData)
+		if err != nil {
+			log.Printf("write response error: %v\n", err)
+		}
+	}
 }
 
 // Start 启动服务器

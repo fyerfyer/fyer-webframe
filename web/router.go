@@ -402,7 +402,6 @@ func (r *Router) findHandler(method string, path string, ctx *Context) (*node, b
 			return wildcardNode, true
 		}
 
-		ctx.routeURL = path
 		return nil, false
 	}
 

@@ -30,7 +30,7 @@ func NewMiddlewareBuilder() *MiddlewareBuilder {
 }
 
 func (m *MiddlewareBuilder) Build() web.Middleware {
-	return func(handler web.HandlerFunc) web.HandlerFunc {
+	return func(next web.HandlerFunc) web.HandlerFunc {
 		return func(ctx *web.Context) {
 			info := logInfo{
 				Host:       ctx.Req.Host,
@@ -40,6 +40,8 @@ func (m *MiddlewareBuilder) Build() web.Middleware {
 			}
 			val, _ := json.Marshal(info)
 			m.logger(string(val))
+
+			next(ctx)
 		}
 	}
 }

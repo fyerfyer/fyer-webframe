@@ -6,6 +6,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
+	"net/http"
 )
 
 type MiddlewareBuilder struct {
@@ -19,7 +20,7 @@ func (m *MiddlewareBuilder) Build() web.Middleware {
 		m.tracer = otel.GetTracerProvider().Tracer(defaultInstrumentationName)
 	}
 
-	return func(handlerFunc web.HandlerFunc) web.HandlerFunc {
+	return func(next web.HandlerFunc) web.HandlerFunc {
 		return func(ctx *web.Context) {
 			reqCtx := ctx.Req.Context()
 			reqCtx = otel.GetTextMapPropagator().Extract(reqCtx, propagation.HeaderCarrier(ctx.Req.Header))
@@ -33,6 +34,12 @@ func (m *MiddlewareBuilder) Build() web.Middleware {
 			span.SetAttributes(attribute.String("span.kind", "server"))
 			span.SetAttributes(attribute.String("component", "web"))
 			span.SetAttributes(attribute.String("http.proto", ctx.Req.Proto))
+
+			next(ctx)
+
+			span.SetName(ctx.RouteURL)
+			ctx.RespStatusCode = http.StatusOK
+			ctx.RespData = []byte("tracing successfully!")
 		}
 	}
 }
