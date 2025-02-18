@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,7 +15,9 @@ type Context struct {
 	RespStatusCode int
 	RespData       []byte
 	unhandled      bool
-	tplEngine      Template // 新增模板引擎字段
+	tplEngine      Template
+	UserValues     map[string]any
+	Context        context.Context
 }
 
 func (c *Context) BindJSON(v any) error {

@@ -1,7 +1,6 @@
-package resource
+package web
 
 import (
-	"github.com/fyerfyer/fyer-webframe/web"
 	"github.com/patrickmn/go-cache"
 	"io"
 	"net/http"
@@ -64,8 +63,8 @@ func NewStaticResource(destPath string) *StaticResource {
 	}
 }
 
-func (sr *StaticResource) Handle() web.HandlerFunc {
-	return func(ctx *web.Context) {
+func (sr *StaticResource) Handle() HandlerFunc {
+	return func(ctx *Context) {
 		// 获取请求路径
 		req := ctx.PathParam("file").Value
 		if req == "" {
