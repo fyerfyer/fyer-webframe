@@ -1,6 +1,7 @@
-package web
+package resource
 
 import (
+	"github.com/fyerfyer/fyer-webframe/web"
 	"io"
 	"net/http"
 	"os"
@@ -21,8 +22,8 @@ func validatePath(destPath string) bool {
 	return true
 }
 
-func (fu FileUploder) HandleUpload() HandlerFunc {
-	return func(ctx *Context) {
+func (fu FileUploder) HandleUpload() web.HandlerFunc {
+	return func(ctx *web.Context) {
 		if !validatePath(fu.DestPath) {
 			ctx.JSON(http.StatusBadRequest, map[string]string{
 				"error": "invalid file path",
@@ -80,8 +81,8 @@ type FileDownloader struct {
 	DestPath string
 }
 
-func (f FileDownloader) HandleDownload() HandlerFunc {
-	return func(ctx *Context) {
+func (f FileDownloader) HandleDownload() web.HandlerFunc {
+	return func(ctx *web.Context) {
 		if !validatePath(f.DestPath) {
 			ctx.JSON(http.StatusBadRequest, map[string]string{
 				"error": "invalid file path",

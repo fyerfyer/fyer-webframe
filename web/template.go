@@ -1,13 +1,14 @@
-package web
+package resource
 
 import (
 	"bytes"
+	"github.com/fyerfyer/fyer-webframe/web"
 	"html/template"
 	"sync"
 )
 
 type Template interface {
-	Render(ctx *Context, tplName string, data any) ([]byte, error)
+	Render(ctx *web.Context, tplName string, data any) ([]byte, error)
 	LoadFromGlob(pattern string) error
 	LoadFromFiles(files ...string) error
 	Reload() error
@@ -102,7 +103,7 @@ func (g *GoTemplate) Reload() error {
 }
 
 // Render 渲染模板
-func (g *GoTemplate) Render(ctx *Context, tplName string, data any) ([]byte, error) {
+func (g *GoTemplate) Render(ctx *web.Context, tplName string, data any) ([]byte, error) {
 	g.RLock()
 	defer g.RUnlock()
 
