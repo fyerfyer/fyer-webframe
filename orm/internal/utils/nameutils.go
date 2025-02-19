@@ -1,16 +1,9 @@
 package utils
 
 import (
-	"reflect"
 	"strings"
 	"unicode"
 )
-
-func GetTableName[T any]() string {
-	var t T
-	tType := reflect.TypeOf(t)
-	return CamelToSnake(tType.Name())
-}
 
 // CamelToSnake 将驼峰式命名转换为下划线命名
 func CamelToSnake(camelStr string) string {

@@ -1,11 +1,13 @@
 package orm
 
+import "github.com/fyerfyer/fyer-webframe/orm/internal/utils"
+
 type Column struct {
 	name string
 }
 
 func Col(name string) Column {
-	return Column{name: name}
+	return Column{name: utils.CamelToSnake(name)}
 }
 
 func (c Column) expr() {}

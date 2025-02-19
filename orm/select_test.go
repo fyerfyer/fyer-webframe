@@ -13,6 +13,9 @@ type TestModel struct {
 }
 
 func TestSelector_Build(t *testing.T) {
+	db, err := NewDB()
+	assert.NoError(t, err)
+
 	testCases := []struct {
 		name      string
 		q         *Selector[TestModel]
@@ -21,7 +24,7 @@ func TestSelector_Build(t *testing.T) {
 	}{
 		{
 			name: "simple from",
-			q:    NewSelector[TestModel]().Select(),
+			q:    RegisterSelector[TestModel](db).Select(),
 			wantQuery: &Query{
 				SQL:  "SELECT * FROM `test_model`;",
 				Args: nil,
@@ -30,7 +33,7 @@ func TestSelector_Build(t *testing.T) {
 		{
 			// 指定列
 			name: "with columns",
-			q:    NewSelector[TestModel]().Select("id", "name"),
+			q:    RegisterSelector[TestModel](db).Select("ID", "Name"),
 			wantQuery: &Query{
 				SQL:  "SELECT `id`, `name` FROM `test_model`;",
 				Args: nil,
@@ -38,8 +41,8 @@ func TestSelector_Build(t *testing.T) {
 		},
 		{
 			name: "with simple where",
-			q: NewSelector[TestModel]().Select().
-				Where(Col("id").Eq(12)),
+			q: RegisterSelector[TestModel](db).Select().
+				Where(Col("ID").Eq(12)),
 			wantQuery: &Query{
 				SQL:  "SELECT * FROM `test_model` WHERE `id` = ?;",
 				Args: []any{Value{12}},
@@ -47,8 +50,8 @@ func TestSelector_Build(t *testing.T) {
 		},
 		{
 			name: "with complex where",
-			q: NewSelector[TestModel]().Select().
-				Where(NOT(Col("id").Eq(12))),
+			q: RegisterSelector[TestModel](db).Select().
+				Where(NOT(Col("ID").Eq(12))),
 			wantQuery: &Query{
 				SQL:  "SELECT * FROM `test_model` WHERE NOT `id` = ?;",
 				Args: []any{Value{12}},
@@ -56,17 +59,27 @@ func TestSelector_Build(t *testing.T) {
 		},
 		{
 			name: "with multiple where",
-			q: NewSelector[TestModel]().Select("id").
-				Where(Col("id").Eq(12), Col("job").IsNull()),
+			q: RegisterSelector[TestModel](db).Select("ID").
+				Where(Col("ID").Eq(12), Col("Job").IsNull()),
 			wantQuery: &Query{
 				SQL:  "SELECT `id` FROM `test_model` WHERE `id` = ? AND `job` IS NULL;",
 				Args: []any{Value{12}},
 			},
 		},
+		{
+			name: "with nonexist column",
+			q:    RegisterSelector[TestModel](db),
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "with nonexist column" {
+				assert.Panics(t, func() {
+					tc.q.Select("ID", "nonexist").Build()
+				})
+				return
+			}
 			query, err := tc.q.Build()
 			assert.Equal(t, tc.wantErr, err)
 			if err != nil {

@@ -1,38 +1,54 @@
 package orm
 
 import (
-	"github.com/fyerfyer/fyer-webframe/orm/utils"
+	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 	"strconv"
 	"strings"
 )
 
 type Deleter[T any] struct {
 	builder *strings.Builder
-	table   string
+	model   *model
 	args    []any
+	db      *DB
 }
 
-func NewDeleter[T any]() *Deleter[T] {
-	tableName := utils.GetTableName[T]()
+func NewDeleter[T any](db *DB) *Deleter[T] {
+	var val T
+	m, err := db.getModel(val)
+	if err != nil {
+		panic(err)
+	}
+
 	return &Deleter[T]{
 		builder: &strings.Builder{},
-		table:   tableName,
+		model:   m,
+		db:      db,
 	}
 }
 
-func (d *Deleter[T]) Delete(args ...string) *Deleter[T] {
-	if args == nil {
-		d.builder.WriteString("DELETE * FROM " + "`" + d.table + "`")
+func (d *Deleter[T]) Delete(cols ...string) *Deleter[T] {
+	// 检查字段是否存在
+	if len(cols) > 0 {
+		for _, col := range cols {
+			if _, ok := d.model.fieldsMap[col]; !ok {
+				panic(ferr.ErrInvalidColumn(col))
+			}
+		}
+	}
+
+	if cols == nil {
+		d.builder.WriteString("DELETE * FROM " + "`" + d.model.table + "`")
 	} else {
 		d.builder.WriteString("SELECT ")
-		for i := 0; i < len(args); i++ {
-			d.builder.WriteString("`" + args[i] + "`")
-			if i != len(args)-1 {
+		for i := 0; i < len(cols); i++ {
+			d.builder.WriteString("`" + cols[i] + "`")
+			if i != len(cols)-1 {
 				d.builder.WriteByte(',')
 			}
 			d.builder.WriteByte(' ')
 		}
-		d.builder.WriteString("FROM " + "`" + d.table + "`")
+		d.builder.WriteString("FROM " + "`" + d.model.table + "`")
 	}
 	return d
 }

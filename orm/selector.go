@@ -1,46 +1,49 @@
 package orm
 
 import (
-	"github.com/fyerfyer/fyer-webframe/orm/utils"
+	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 	"strconv"
 	"strings"
 )
 
 type Selector[T any] struct {
 	builder *strings.Builder
-	table   string
+	model   *model
 	args    []any
-	orderBy *OrderBy
+	db      *DB
 }
 
-type OrderBy struct {
-	col  string
-	desc bool
-}
-
-func NewSelector[T any]() *Selector[T] {
-
-	tableName := utils.GetTableName[T]()
+func RegisterSelector[T any](db *DB) *Selector[T] {
+	var val T
+	m, err := db.getModel(val)
+	if err != nil {
+		panic(err)
+	}
 
 	return &Selector[T]{
 		builder: &strings.Builder{},
-		table:   tableName,
+		model:   m,
+		db:      db,
 	}
 }
 
-func (s *Selector[T]) Select(args ...string) *Selector[T] {
-	if args == nil {
-		s.builder.WriteString("SELECT * FROM " + "`" + s.table + "`")
+func (s *Selector[T]) Select(cols ...string) *Selector[T] {
+	if cols == nil {
+		s.builder.WriteString("SELECT * FROM " + "`" + s.model.table + "`")
 	} else {
 		s.builder.WriteString("SELECT ")
-		for i := 0; i < len(args); i++ {
-			s.builder.WriteString("`" + args[i] + "`")
-			if i != len(args)-1 {
+		for i := 0; i < len(cols); i++ {
+			colName, ok := s.model.fieldsMap[cols[i]]
+			if !ok {
+				panic(ferr.ErrInvalidColumn(cols[i]))
+			}
+			s.builder.WriteString("`" + colName.colName + "`")
+			if i != len(cols)-1 {
 				s.builder.WriteByte(',')
 			}
 			s.builder.WriteByte(' ')
 		}
-		s.builder.WriteString("FROM " + "`" + s.table + "`")
+		s.builder.WriteString("FROM " + "`" + s.model.table + "`")
 	}
 	return s
 }
