@@ -65,7 +65,12 @@ func (p Predicate) Build(builder *strings.Builder, args *[]any) {
 			pred.Build(builder, args)
 		} else {
 			builder.WriteString("?")
-			*args = append(*args, p.right)
+			// 如果是 Value 类型，取其中的实际值
+			if v, ok := p.right.(*Value); ok {
+				*args = append(*args, v.val)
+			} else {
+				*args = append(*args, p.right)
+			}
 		}
 	}
 }

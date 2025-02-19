@@ -2,6 +2,11 @@ package ferr
 
 import "fmt"
 
+var (
+	ErrNoRows      = fmt.Errorf("data not found")
+	ErrTooManyRows = fmt.Errorf("too many rows")
+)
+
 func ErrInvalidColumn(col string) error {
 	return fmt.Errorf("invalid column name: %s", col)
 }

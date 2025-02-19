@@ -10,7 +10,8 @@ import (
 type model struct {
 	table string
 	// fieldsMap负责原数据名称到数据库列名的映射
-	fieldsMap map[string]*field
+	fieldsMap  map[string]*field
+	colNameMap map[string]string
 }
 
 type field struct {
@@ -28,9 +29,11 @@ func parseModel(v any) (*model, error) {
 
 	num := typ.NumField()
 	fields := make(map[string]*field, num)
+	colNameMap := make(map[string]string, num)
 	for i := 0; i < num; i++ {
 		fieldVar := &field{}
 		f := typ.Field(i)
+
 		// 检查是否有自定义tag
 		tags, err := parseTag(f)
 		if err != nil {
@@ -44,11 +47,14 @@ func parseModel(v any) (*model, error) {
 		}
 
 		fields[f.Name] = fieldVar
+		// 存储列名到字段名的映射
+		colNameMap[fieldVar.colName] = f.Name
 	}
 
 	return &model{
-		table:     utils.CamelToSnake(typ.Name()),
-		fieldsMap: fields,
+		table:      utils.CamelToSnake(typ.Name()),
+		fieldsMap:  fields,
+		colNameMap: colNameMap, // 添加这个字段
 	}, nil
 }
 

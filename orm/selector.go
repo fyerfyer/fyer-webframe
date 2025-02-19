@@ -1,9 +1,13 @@
 package orm
 
 import (
-	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
+	"context"
+	"database/sql"
+	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 )
 
 type Selector[T any] struct {
@@ -92,4 +96,91 @@ func (s *Selector[T]) Build() (*Query, error) {
 		SQL:  s.builder.String(),
 		Args: s.args,
 	}, nil
+}
+
+// scanRow 将一行数据扫描到结构体中
+func (s *Selector[T]) scanRow(rows *sql.Rows) (*T, error) {
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	t := new(T)
+	vals := make([]any, len(cols))
+	// new返回的是指针
+	valElem := reflect.ValueOf(t).Elem()
+
+	for i, col := range cols {
+		if fieldName, ok := s.model.colNameMap[col]; ok {
+			field := valElem.FieldByName(fieldName)
+			vals[i] = field.Addr().Interface()
+		} else {
+			var v any
+			vals[i] = &v
+		}
+	}
+
+	if err = rows.Scan(vals...); err != nil {
+		return nil, err
+	}
+
+	return t, nil
+}
+
+// Get 获取单行数据
+func (s *Selector[T]) Get(ctx context.Context) (*T, error) {
+	q, err := s.Build()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.sqlDB.QueryContext(ctx, q.SQL, q.Args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return nil, ferr.ErrNoRows
+	}
+
+	t, err := s.scanRow(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	if rows.Next() {
+		return nil, ferr.ErrTooManyRows
+	}
+
+	return t, nil
+}
+
+// GetMulti 获取多行数据
+func (s *Selector[T]) GetMulti(ctx context.Context) ([]*T, error) {
+	q, err := s.Build()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.sqlDB.QueryContext(ctx, q.SQL, q.Args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*T
+	for rows.Next() {
+		t, err := s.scanRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, t)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

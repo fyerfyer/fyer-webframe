@@ -17,6 +17,7 @@ const (
 // 预定义操作符
 var (
 	opEQ      = Op{Type: OpBinary, Keyword: "="}
+	opGT      = Op{Type: OpBinary, Keyword: ">"}
 	opNOT     = Op{Type: OpUnary, Keyword: "NOT"}
 	opISNULL  = Op{Type: OpUnary, Keyword: "IS NULL"}
 	opNOTNULL = Op{Type: OpUnary, Keyword: "IS NOT NULL"}

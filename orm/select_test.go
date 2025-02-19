@@ -1,8 +1,12 @@
 package orm
 
 import (
+	"context"
 	"database/sql"
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"testing"
 )
 
@@ -35,8 +39,13 @@ type TestModelWithTag struct {
 }
 
 func TestSelector_Build(t *testing.T) {
-	db, err := NewDB()
-	assert.NoError(t, err)
+	// 使用 sqlmock
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB)
+	require.NoError(t, err)
 
 	testCases := []struct {
 		name      string
@@ -113,8 +122,12 @@ func TestSelector_Build(t *testing.T) {
 }
 
 func TestTableNameInterface(t *testing.T) {
-	db, err := NewDB()
-	assert.NoError(t, err)
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB)
+	require.NoError(t, err)
 
 	testCases := []struct {
 		name      string
@@ -172,8 +185,12 @@ func TestTableNameInterface(t *testing.T) {
 }
 
 func TestSelectorTag(t *testing.T) {
-	db, err := NewDB()
-	assert.NoError(t, err)
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB)
+	require.NoError(t, err)
 
 	testCases := []struct {
 		name      string
@@ -209,6 +226,131 @@ func TestSelectorTag(t *testing.T) {
 				return
 			}
 			assert.Equal(t, tc.wantQuery, query)
+		})
+	}
+}
+
+func TestSelector_Get(t *testing.T) {
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB)
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name     string
+		query    string
+		mockRows *sqlmock.Rows
+		wantErr  error
+		wantRes  *TestModel
+	}{
+		{
+			name:  "single row",
+			query: "SELECT \\* FROM `test_model` WHERE `id` = \\?;",
+			mockRows: sqlmock.NewRows([]string{"id", "name", "job"}).
+				AddRow(1, "Tom", sql.NullString{String: "programmer", Valid: true}),
+			wantRes: &TestModel{
+				ID:   1,
+				Name: "Tom",
+				Job:  sql.NullString{String: "programmer", Valid: true},
+			},
+		},
+		{
+			name:     "no rows",
+			query:    "SELECT \\* FROM `test_model` WHERE `id` = \\?;",
+			mockRows: sqlmock.NewRows([]string{"id", "name", "job"}),
+			wantErr:  ferr.ErrNoRows,
+		},
+		{
+			name:  "multiple rows",
+			query: "SELECT \\* FROM `test_model` WHERE `id` = \\?;",
+			mockRows: sqlmock.NewRows([]string{"id", "name", "job"}).
+				AddRow(1, "Tom", sql.NullString{String: "programmer", Valid: true}).
+				AddRow(2, "Jerry", sql.NullString{String: "teacher", Valid: true}),
+			wantErr: ferr.ErrTooManyRows,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mock.ExpectQuery(tc.query).
+				WithArgs(1).
+				WillReturnRows(tc.mockRows)
+
+			res, err := RegisterSelector[TestModel](db).
+				Select().
+				Where(Col("ID").Eq(1)).
+				Get(context.Background())
+
+			assert.Equal(t, tc.wantErr, err)
+			if err != nil {
+				return
+			}
+			assert.Equal(t, tc.wantRes, res)
+		})
+	}
+}
+
+func TestSelector_GetMulti(t *testing.T) {
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB)
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name     string
+		query    string
+		mockRows *sqlmock.Rows
+		wantErr  error
+		wantRes  []*TestModel
+	}{
+		{
+			name:  "multiple rows",
+			query: "SELECT \\* FROM `test_model` WHERE `age` > \\?;",
+			mockRows: sqlmock.NewRows([]string{"id", "name", "job"}).
+				AddRow(1, "Tom", sql.NullString{String: "programmer", Valid: true}).
+				AddRow(2, "Jerry", sql.NullString{String: "teacher", Valid: true}),
+			wantRes: []*TestModel{
+				{
+					ID:   1,
+					Name: "Tom",
+					Job:  sql.NullString{String: "programmer", Valid: true},
+				},
+				{
+					ID:   2,
+					Name: "Jerry",
+					Job:  sql.NullString{String: "teacher", Valid: true},
+				},
+			},
+		},
+		{
+			name:     "no rows",
+			query:    "SELECT \\* FROM `test_model` WHERE `age` > \\?;",
+			mockRows: sqlmock.NewRows([]string{"id", "name", "job"}),
+			wantRes:  []*TestModel(nil),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mock.ExpectQuery(tc.query).
+				WithArgs(18).
+				WillReturnRows(tc.mockRows)
+
+			res, err := RegisterSelector[TestModel](db).
+				Select().
+				Where(Col("Age").Gt(18)).
+				GetMulti(context.Background())
+
+			assert.Equal(t, tc.wantErr, err)
+			if err != nil {
+				return
+			}
+			assert.Equal(t, tc.wantRes, res)
+			assert.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
 }

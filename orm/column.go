@@ -19,6 +19,14 @@ func (c *Column) Eq(arg any) Predicate {
 	}
 }
 
+func (c *Column) Gt(arg any) Predicate {
+	return Predicate{
+		left:  c,
+		op:    opGT,
+		right: valueOf(arg),
+	}
+}
+
 func (c *Column) IsNull() Predicate {
 	return Predicate{
 		left: c,
