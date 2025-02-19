@@ -8,6 +8,7 @@ import (
 
 type Selector[T any] struct {
 	builder *strings.Builder
+	table   string
 	model   *model
 	args    []any
 	db      *DB
@@ -18,6 +19,16 @@ func RegisterSelector[T any](db *DB) *Selector[T] {
 	m, err := db.getModel(val)
 	if err != nil {
 		panic(err)
+	}
+
+	// 结构体或者结构体指针实现TableNameInterface接口即可
+	if tablename, ok := any(val).(TableNameInterface); ok {
+		m.table = tablename.TableName()
+	}
+
+	// 尝试取指针
+	if tablename, ok := any(&val).(TableNameInterface); ok {
+		m.table = tablename.TableName()
 	}
 
 	return &Selector[T]{
@@ -51,6 +62,12 @@ func (s *Selector[T]) Select(cols ...string) *Selector[T] {
 func (s *Selector[T]) Where(conditions ...Condition) *Selector[T] {
 	s.builder.WriteString(" WHERE ")
 	for i := 0; i < len(conditions); i++ {
+		if pred, ok := conditions[i].(Predicate); ok {
+			if col, ok := pred.left.(*Column); ok {
+				// 注入模型信息
+				col.model = s.model
+			}
+		}
 		conditions[i].Build(s.builder, &s.args)
 		if i != len(conditions)-1 {
 			s.builder.WriteString(" AND ")

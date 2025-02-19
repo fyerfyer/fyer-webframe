@@ -8,7 +8,6 @@ type Querier[T any] interface {
 }
 
 type SelectorInterface[T any] interface {
-	From(table string) SelectorInterface[T]             // 指定表名
 	Where(conditions ...Condition) SelectorInterface[T] // Where条件
 	Select(cols ...string) SelectorInterface[T]         // 指定列
 	OrderBy(col string, desc bool) SelectorInterface[T] // 排序
@@ -18,7 +17,11 @@ type SelectorInterface[T any] interface {
 }
 
 type DeleterInterface[T any] interface {
-	From(table string) DeleterInterface[T]             // 指定表名
 	Where(conditions ...Condition) DeleterInterface[T] // Where条件
+	Delete(cols ...string) SelectorInterface[T]        // 指定列
 	Build() (*Query, error)                            // 构建SQL
+}
+
+type TableNameInterface interface {
+	TableName() string
 }

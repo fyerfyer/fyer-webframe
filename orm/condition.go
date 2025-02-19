@@ -1,6 +1,9 @@
 package orm
 
-import "strings"
+import (
+	"github.com/fyerfyer/fyer-webframe/orm/internal/utils"
+	"strings"
+)
 
 type Condition interface {
 	Build(builder *strings.Builder, args *[]any)
@@ -19,9 +22,21 @@ func (p Predicate) Build(builder *strings.Builder, args *[]any) {
 	switch p.op.Type {
 	case OpUnary:
 		// 一元运算符
-		if col, ok := p.left.(Column); ok {
-			builder.WriteString("`" + col.name + "` ")
+		if col, ok := p.left.(*Column); ok {
+			builder.WriteString("`")
+			// 优先使用模型中的列名
+			if col.model != nil {
+				if fd, ok := col.model.fieldsMap[col.name]; ok {
+					builder.WriteString(fd.colName)
+				} else {
+					builder.WriteString(utils.CamelToSnake(col.name))
+				}
+			} else {
+				builder.WriteString(utils.CamelToSnake(col.name))
+			}
+			builder.WriteString("`")
 		}
+		builder.WriteString(" ")
 		builder.WriteString(p.op.Keyword)
 		if pred, ok := p.right.(Condition); ok {
 			builder.WriteString(" ")
@@ -29,9 +44,18 @@ func (p Predicate) Build(builder *strings.Builder, args *[]any) {
 		}
 	case OpBinary:
 		// 二元运算符
-		if c, ok := p.left.(Column); ok {
+		if col, ok := p.left.(*Column); ok {
 			builder.WriteString("`")
-			builder.WriteString(c.name)
+			// 优先使用模型中的列名
+			if col.model != nil {
+				if fd, ok := col.model.fieldsMap[col.name]; ok {
+					builder.WriteString(fd.colName)
+				} else {
+					builder.WriteString(utils.CamelToSnake(col.name))
+				}
+			} else {
+				builder.WriteString(utils.CamelToSnake(col.name))
+			}
 			builder.WriteString("`")
 		}
 		builder.WriteString(" ")

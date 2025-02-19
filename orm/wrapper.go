@@ -9,9 +9,9 @@ type Value struct {
 	val any
 }
 
-func (v Value) expr() {}
+func (v *Value) expr() {}
 
 // valueOf 将基础类型封装为Value
-func valueOf(val any) Value {
-	return Value{val: val}
+func valueOf(val any) *Value {
+	return &Value{val: val}
 }
