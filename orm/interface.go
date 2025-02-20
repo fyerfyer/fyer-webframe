@@ -1,25 +1,40 @@
 package orm
 
-import "context"
+import (
+	"context"
+	"database/sql"
+)
 
+// Querier 抽取公共的查询接口
+type Querier[T any] interface {
+	Build() (*Query, error)
+	Where(conditions ...Condition) Querier[T]
+}
+
+// SelectorInterface 查询接口
 type SelectorInterface[T any] interface {
-	Where(conditions ...Condition) SelectorInterface[T] // Where条件
-	Select(cols ...string) SelectorInterface[T]         // 指定列
-	OrderBy(col string, desc bool) SelectorInterface[T] // 排序
-	Limit(limit int) SelectorInterface[T]               // 限制行数
-	Offset(offset int) SelectorInterface[T]             // 偏移量
-	Build() (*Query, error)                             // 构建SQL
-
-	Get(ctx context.Context) (*T, error)        // 获取单个结果
-	GetMulti(ctx context.Context) ([]*T, error) // 获取多个结果
+	Querier[T]
+	Select(cols ...Selectable) *Selector[T]
+	OrderBy(col string, desc bool) *Selector[T]
+	Limit(limit int) *Selector[T]
+	Offset(offset int) *Selector[T]
+	Get(ctx context.Context) (*T, error)
+	GetMulti(ctx context.Context) ([]*T, error)
 }
 
+// DeleterInterface 删除接口
 type DeleterInterface[T any] interface {
-	Where(conditions ...Condition) DeleterInterface[T] // Where条件
-	Delete(cols ...string) SelectorInterface[T]        // 指定列
-	Build() (*Query, error)                            // 构建SQL
+	Querier[T]
+	Delete() *Deleter[T]
+	Limit(limit int) *Deleter[T]
 }
 
-type TableNameInterface interface {
+// TableNamer 表名接口
+type TableNamer interface {
 	TableName() string
+}
+
+// Executor 添加执行器接口
+type Executor interface {
+	Exec(ctx context.Context) (sql.Result, error)
 }

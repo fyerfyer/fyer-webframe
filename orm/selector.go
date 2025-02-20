@@ -26,12 +26,12 @@ func RegisterSelector[T any](db *DB) *Selector[T] {
 	}
 
 	// 结构体或者结构体指针实现TableNameInterface接口即可
-	if tablename, ok := any(val).(TableNameInterface); ok {
+	if tablename, ok := any(val).(TableNamer); ok {
 		m.table = tablename.TableName()
 	}
 
 	// 尝试取指针
-	if tablename, ok := any(&val).(TableNameInterface); ok {
+	if tablename, ok := any(&val).(TableNamer); ok {
 		m.table = tablename.TableName()
 	}
 
@@ -42,7 +42,7 @@ func RegisterSelector[T any](db *DB) *Selector[T] {
 	}
 }
 
-func (s *Selector[T]) Select(cols ...selectable) *Selector[T] {
+func (s *Selector[T]) Select(cols ...Selectable) *Selector[T] {
 	if cols == nil {
 		s.builder.WriteString("SELECT * FROM " + "`" + s.model.table + "`")
 		return s

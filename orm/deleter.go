@@ -1,6 +1,8 @@
 package orm
 
 import (
+	"context"
+	"database/sql"
 	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 	"strconv"
 	"strings"
@@ -13,7 +15,7 @@ type Deleter[T any] struct {
 	db      *DB
 }
 
-func NewDeleter[T any](db *DB) *Deleter[T] {
+func RegisterDeleter[T any](db *DB) *Deleter[T] {
 	var val T
 	m, err := db.getModel(val)
 	if err != nil {
@@ -27,35 +29,51 @@ func NewDeleter[T any](db *DB) *Deleter[T] {
 	}
 }
 
-func (d *Deleter[T]) Delete(cols ...string) *Deleter[T] {
-	// 检查字段是否存在
-	if len(cols) > 0 {
-		for _, col := range cols {
-			if _, ok := d.model.fieldsMap[col]; !ok {
-				panic(ferr.ErrInvalidColumn(col))
-			}
-		}
+func (d *Deleter[T]) Delete(cols ...Selectable) *Deleter[T] {
+	if cols == nil {
+		d.builder.WriteString("DELETE FROM " + "`" + d.model.table + "`")
+		return d
 	}
 
-	if cols == nil {
-		d.builder.WriteString("DELETE * FROM " + "`" + d.model.table + "`")
-	} else {
-		d.builder.WriteString("SELECT ")
-		for i := 0; i < len(cols); i++ {
-			d.builder.WriteString("`" + cols[i] + "`")
+	d.builder.WriteString("DELETE ")
+	for i := 0; i < len(cols); i++ {
+		switch col := cols[i].(type) {
+		case *Column:
+			// 注入模型信息
+			col.model = d.model
+			col.Build(d.builder)
 			if i != len(cols)-1 {
 				d.builder.WriteByte(',')
 			}
 			d.builder.WriteByte(' ')
+		case Aggregate:
+			col.Build(d.builder)
+			if i != len(cols)-1 {
+				d.builder.WriteByte(',')
+			}
+			d.builder.WriteByte(' ')
+		case RawExpr:
+			col.Build(d.builder)
+			d.builder.WriteByte(' ')
+			d.args = append(d.args, col.args...)
+		default:
+			panic(ferr.ErrInvalidSelectable(col))
 		}
-		d.builder.WriteString("FROM " + "`" + d.model.table + "`")
 	}
+
+	d.builder.WriteString("FROM " + "`" + d.model.table + "`")
 	return d
 }
 
 func (d *Deleter[T]) Where(conditions ...Condition) *Deleter[T] {
 	d.builder.WriteString(" WHERE ")
 	for i := 0; i < len(conditions); i++ {
+		if pred, ok := conditions[i].(Predicate); ok {
+			if col, ok := pred.left.(*Column); ok {
+				// 注入模型信息
+				col.model = d.model
+			}
+		}
 		conditions[i].Build(d.builder, &d.args)
 		if i != len(conditions)-1 {
 			d.builder.WriteString(" AND ")
@@ -80,4 +98,13 @@ func (d *Deleter[T]) Build() (*Query, error) {
 		SQL:  d.builder.String(),
 		Args: d.args,
 	}, nil
+}
+
+// Exec 添加执行方法
+func (d *Deleter[T]) Exec(ctx context.Context) (sql.Result, error) {
+	q, err := d.Build()
+	if err != nil {
+		return nil, err
+	}
+	return d.db.sqlDB.ExecContext(ctx, q.SQL, q.Args...)
 }
