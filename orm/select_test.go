@@ -64,7 +64,7 @@ func TestSelector_Build(t *testing.T) {
 		{
 			// 指定列
 			name: "with columns",
-			q:    RegisterSelector[TestModel](db).Select("ID", "Name"),
+			q:    RegisterSelector[TestModel](db).Select(Col("ID"), Col("Name")),
 			wantQuery: &Query{
 				SQL:  "SELECT `id`, `name` FROM `test_model`;",
 				Args: nil,
@@ -90,7 +90,7 @@ func TestSelector_Build(t *testing.T) {
 		},
 		{
 			name: "with multiple where",
-			q: RegisterSelector[TestModel](db).Select("ID").
+			q: RegisterSelector[TestModel](db).Select(Col("ID")).
 				Where(Col("ID").Eq(12), Col("Job").IsNull()),
 			wantQuery: &Query{
 				SQL:  "SELECT `id` FROM `test_model` WHERE `id` = ? AND `job` IS NULL;",
@@ -107,7 +107,7 @@ func TestSelector_Build(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.name == "with nonexist column" {
 				assert.Panics(t, func() {
-					tc.q.Select("ID", "nonexist").Build()
+					tc.q.Select(Col("ID"), Col("nonexist")).Build()
 				})
 				return
 			}
@@ -201,7 +201,7 @@ func TestSelectorTag(t *testing.T) {
 		{
 			// 指定列
 			name: "with columns",
-			q:    RegisterSelector[TestModelWithTag](db).Select("ID", "Name"),
+			q:    RegisterSelector[TestModelWithTag](db).Select(Col("ID"), Col("Name")),
 			wantQuery: &Query{
 				SQL:  "SELECT `testid`, `testname` FROM `test_model_with_tag`;",
 				Args: nil,
@@ -351,6 +351,184 @@ func TestSelector_GetMulti(t *testing.T) {
 			}
 			assert.Equal(t, tc.wantRes, res)
 			assert.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestSelector_Aggregate(t *testing.T) {
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB)
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name      string
+		q         *Selector[TestModel]
+		wantQuery *Query
+		wantErr   error
+	}{
+		{
+			name: "count",
+			q: RegisterSelector[TestModel](db).
+				Select(Count("Age")),
+			wantQuery: &Query{
+				SQL:  "SELECT COUNT(`age`) FROM `test_model`;",
+				Args: nil,
+			},
+		},
+		{
+			name: "count distinct",
+			q: RegisterSelector[TestModel](db).
+				Select(CountDistinct("Age")),
+			wantQuery: &Query{
+				SQL:  "SELECT COUNT(DISTINCT `age`) FROM `test_model`;",
+				Args: nil,
+			},
+		},
+		{
+			name: "sum",
+			q: RegisterSelector[TestModel](db).
+				Select(Sum("Age")),
+			wantQuery: &Query{
+				SQL:  "SELECT SUM(`age`) FROM `test_model`;",
+				Args: nil,
+			},
+		},
+		{
+			name: "avg",
+			q: RegisterSelector[TestModel](db).
+				Select(Avg("Age")),
+			wantQuery: &Query{
+				SQL:  "SELECT AVG(`age`) FROM `test_model`;",
+				Args: nil,
+			},
+		},
+		{
+			name: "max",
+			q: RegisterSelector[TestModel](db).
+				Select(Max("Age")),
+			wantQuery: &Query{
+				SQL:  "SELECT MAX(`age`) FROM `test_model`;",
+				Args: nil,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			query, err := tc.q.Build()
+			assert.Equal(t, tc.wantErr, err)
+			if err != nil {
+				return
+			}
+			assert.Equal(t, tc.wantQuery, query)
+		})
+	}
+}
+
+func TestSelector_As(t *testing.T) {
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB)
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name      string
+		q         *Selector[TestModel]
+		wantQuery *Query
+		wantErr   error
+	}{
+		{
+			name: "column with alias",
+			q: RegisterSelector[TestModel](db).
+				Select(Col("ID").As("user_id")),
+			wantQuery: &Query{
+				SQL:  "SELECT `id` AS `user_id` FROM `test_model`;",
+				Args: nil,
+			},
+		},
+		{
+			name: "aggregate with alias",
+			q: RegisterSelector[TestModel](db).
+				Select(Count("Age").As("total_age")),
+			wantQuery: &Query{
+				SQL:  "SELECT COUNT(`age`) AS `total_age` FROM `test_model`;",
+				Args: nil,
+			},
+		},
+		{
+			name: "mixed columns with alias",
+			q: RegisterSelector[TestModel](db).
+				Select(
+					Col("ID").As("user_id"),
+					Count("Age").As("total_age"),
+					Avg("Age").As("avg_age"),
+				),
+			wantQuery: &Query{
+				SQL:  "SELECT `id` AS `user_id`, COUNT(`age`) AS `total_age`, AVG(`age`) AS `avg_age` FROM `test_model`;",
+				Args: nil,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			query, err := tc.q.Build()
+			assert.Equal(t, tc.wantErr, err)
+			if err != nil {
+				return
+			}
+			assert.Equal(t, tc.wantQuery, query)
+		})
+	}
+}
+
+func TestSelector_Raw(t *testing.T) {
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB)
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name      string
+		q         *Selector[TestModel]
+		wantQuery *Query
+		wantErr   error
+	}{
+		{
+			name: "raw expression",
+			q: RegisterSelector[TestModel](db).
+				Select(Raw("CASE WHEN `age` > 18 THEN 'adult' ELSE 'minor' END as age_group")),
+			wantQuery: &Query{
+				SQL:  "SELECT CASE WHEN `age` > 18 THEN 'adult' ELSE 'minor' END as age_group FROM `test_model`;",
+				Args: nil,
+			},
+		},
+		{
+			name: "raw with args",
+			q: RegisterSelector[TestModel](db).
+				Select(Raw("CASE WHEN `age` > ? THEN ? ELSE ? END as age_group", 18, "adult", "minor")),
+			wantQuery: &Query{
+				SQL:  "SELECT CASE WHEN `age` > ? THEN ? ELSE ? END as age_group FROM `test_model`;",
+				Args: []any{18, "adult", "minor"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			query, err := tc.q.Build()
+			assert.Equal(t, tc.wantErr, err)
+			if err != nil {
+				return
+			}
+			assert.Equal(t, tc.wantQuery, query)
 		})
 	}
 }

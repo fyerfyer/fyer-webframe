@@ -1,7 +1,13 @@
 package orm
 
+import (
+	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
+	"strings"
+)
+
 type Column struct {
 	name  string
+	alias string
 	model *model
 }
 
@@ -10,6 +16,34 @@ func Col(name string) *Column {
 }
 
 func (c *Column) expr() {}
+
+func (c *Column) selectable() {}
+
+func (c *Column) As(alias string) *Column {
+	return &Column{
+		name:  c.name,
+		alias: alias,
+		model: c.model,
+	}
+}
+
+func (c *Column) Build(builder *strings.Builder) {
+	if c.model == nil {
+		panic(ferr.ErrInvalidColumn(c.name))
+	}
+
+	col, ok := c.model.fieldsMap[c.name]
+	if !ok {
+		panic(ferr.ErrInvalidColumn(c.name))
+	}
+
+	builder.WriteString("`" + col.colName + "`")
+	if c.alias != "" {
+		builder.WriteString(" AS `")
+		builder.WriteString(c.alias)
+		builder.WriteString("`")
+	}
+}
 
 func (c *Column) Eq(arg any) Predicate {
 	return Predicate{

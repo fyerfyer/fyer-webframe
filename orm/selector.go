@@ -42,24 +42,39 @@ func RegisterSelector[T any](db *DB) *Selector[T] {
 	}
 }
 
-func (s *Selector[T]) Select(cols ...string) *Selector[T] {
+func (s *Selector[T]) Select(cols ...selectable) *Selector[T] {
 	if cols == nil {
 		s.builder.WriteString("SELECT * FROM " + "`" + s.model.table + "`")
-	} else {
-		s.builder.WriteString("SELECT ")
-		for i := 0; i < len(cols); i++ {
-			colName, ok := s.model.fieldsMap[cols[i]]
-			if !ok {
-				panic(ferr.ErrInvalidColumn(cols[i]))
-			}
-			s.builder.WriteString("`" + colName.colName + "`")
+		return s
+	}
+
+	s.builder.WriteString("SELECT ")
+	for i := 0; i < len(cols); i++ {
+		switch col := cols[i].(type) {
+		case *Column:
+			// 注入模型信息
+			col.model = s.model
+			col.Build(s.builder)
 			if i != len(cols)-1 {
 				s.builder.WriteByte(',')
 			}
 			s.builder.WriteByte(' ')
+		case Aggregate:
+			col.Build(s.builder)
+			if i != len(cols)-1 {
+				s.builder.WriteByte(',')
+			}
+			s.builder.WriteByte(' ')
+		case RawExpr:
+			col.Build(s.builder)
+			s.builder.WriteByte(' ')
+			s.args = append(s.args, col.args...)
+		default:
+			panic(ferr.ErrInvalidSelectable(col))
 		}
-		s.builder.WriteString("FROM " + "`" + s.model.table + "`")
 	}
+
+	s.builder.WriteString("FROM " + "`" + s.model.table + "`")
 	return s
 }
 

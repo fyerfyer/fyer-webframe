@@ -14,3 +14,7 @@ func ErrInvalidColumn(col string) error {
 func ErrInvalidTag(tag string) error {
 	return fmt.Errorf("invalid tag: %s", tag)
 }
+
+func ErrInvalidSelectable(col any) error {
+	return fmt.Errorf("invalid selectable column: %v", col)
+}
