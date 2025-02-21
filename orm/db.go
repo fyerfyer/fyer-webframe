@@ -1,11 +1,15 @@
 package orm
 
-import "database/sql"
+import (
+	"database/sql"
+	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
+)
 
 // DB 是orm用来管理数据库连接和缓存之类持久化内容的结构体
 type DB struct {
-	model *modelCache // 元数据缓存
-	sqlDB *sql.DB     // 数据库连接
+	model   *modelCache // 元数据缓存
+	sqlDB   *sql.DB     // 数据库连接
+	dialect Dialect     // 数据库方言
 }
 
 // DBOption 定义配置项
@@ -26,10 +30,16 @@ func (db *DB) getModel(val any) (*model, error) {
 	return db.model.get(val)
 }
 
-func Open(db *sql.DB, opts ...DBOption) (*DB, error) {
+func Open(db *sql.DB, dialectName string, opts ...DBOption) (*DB, error) {
+	dialect, ok := dialects[dialectName]
+	if !ok {
+		return nil, ferr.ErrInvalidDialect(dialectName)
+	}
+
 	d := &DB{
-		model: NewModelCache(),
-		sqlDB: db,
+		model:   NewModelCache(),
+		sqlDB:   db,
+		dialect: dialect,
 	}
 
 	for _, opt := range opts {
@@ -41,11 +51,11 @@ func Open(db *sql.DB, opts ...DBOption) (*DB, error) {
 	return d, nil
 }
 
-func OpenDB(driver, dsn string, opts ...DBOption) (*DB, error) {
+func OpenDB(driver, dsn string, dialectName string, opts ...DBOption) (*DB, error) {
 	sqlDB, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, err
 	}
 
-	return Open(sqlDB, opts...)
+	return Open(sqlDB, dialectName, opts...)
 }

@@ -45,6 +45,19 @@ func (c *Column) Build(builder *strings.Builder) {
 	}
 }
 
+func (c *Column) BuildWithoutQuote(builder *strings.Builder) {
+	if c.model == nil {
+		panic(ferr.ErrInvalidColumn(c.name))
+	}
+
+	col, ok := c.model.fieldsMap[c.name]
+	if !ok {
+		panic(ferr.ErrInvalidColumn(c.name))
+	}
+
+	builder.WriteString(col.colName)
+}
+
 func (c *Column) Eq(arg any) Predicate {
 	return Predicate{
 		left:  c,

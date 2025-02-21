@@ -44,7 +44,7 @@ func TestSelector_Build(t *testing.T) {
 	require.NoError(t, err)
 	defer mockDB.Close()
 
-	db, err := Open(mockDB)
+	db, err := Open(mockDB, "mysql")
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -126,7 +126,7 @@ func TestTableNameInterface(t *testing.T) {
 	require.NoError(t, err)
 	defer mockDB.Close()
 
-	db, err := Open(mockDB)
+	db, err := Open(mockDB, "mysql")
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -189,7 +189,7 @@ func TestSelectorTag(t *testing.T) {
 	require.NoError(t, err)
 	defer mockDB.Close()
 
-	db, err := Open(mockDB)
+	db, err := Open(mockDB, "mysql")
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -235,7 +235,7 @@ func TestSelector_Get(t *testing.T) {
 	require.NoError(t, err)
 	defer mockDB.Close()
 
-	db, err := Open(mockDB)
+	db, err := Open(mockDB, "mysql")
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -297,7 +297,7 @@ func TestSelector_GetMulti(t *testing.T) {
 	require.NoError(t, err)
 	defer mockDB.Close()
 
-	db, err := Open(mockDB)
+	db, err := Open(mockDB, "mysql")
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -360,7 +360,7 @@ func TestSelector_Aggregate(t *testing.T) {
 	require.NoError(t, err)
 	defer mockDB.Close()
 
-	db, err := Open(mockDB)
+	db, err := Open(mockDB, "mysql")
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -433,7 +433,7 @@ func TestSelector_As(t *testing.T) {
 	require.NoError(t, err)
 	defer mockDB.Close()
 
-	db, err := Open(mockDB)
+	db, err := Open(mockDB, "mysql")
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -492,7 +492,7 @@ func TestSelector_Raw(t *testing.T) {
 	require.NoError(t, err)
 	defer mockDB.Close()
 
-	db, err := Open(mockDB)
+	db, err := Open(mockDB, "mysql")
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -517,6 +517,64 @@ func TestSelector_Raw(t *testing.T) {
 			wantQuery: &Query{
 				SQL:  "SELECT CASE WHEN `age` > ? THEN ? ELSE ? END as age_group FROM `test_model`;",
 				Args: []any{18, "adult", "minor"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			query, err := tc.q.Build()
+			assert.Equal(t, tc.wantErr, err)
+			if err != nil {
+				return
+			}
+			assert.Equal(t, tc.wantQuery, query)
+		})
+	}
+}
+
+func TestSelector_GroupBy(t *testing.T) {
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB, "mysql")
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name      string
+		q         *Selector[TestModel]
+		wantQuery *Query
+		wantErr   error
+	}{
+		{
+			name: "group by",
+			q: RegisterSelector[TestModel](db).
+				Select(Col("ID")).
+				GroupBy(Col("Name")),
+			wantQuery: &Query{
+				SQL:  "SELECT `id` FROM `test_model` GROUP BY `name`;",
+				Args: nil,
+			},
+		},
+		{
+			name: "group by multiple columns",
+			q: RegisterSelector[TestModel](db).
+				Select(Col("ID")).
+				GroupBy(Col("Job"), Col("Name")),
+			wantQuery: &Query{
+				SQL:  "SELECT `id` FROM `test_model` GROUP BY `job`, `name`;",
+				Args: nil,
+			},
+		},
+		{
+			name: "group by with aggregate",
+			q: RegisterSelector[TestModel](db).
+				Select(Count("ID")).
+				GroupBy(Count("Name")),
+			wantQuery: &Query{
+				SQL: "SELECT COUNT(`id`) FROM `test_model` GROUP BY COUNT(`name`);",
+				Args: nil,
 			},
 		},
 	}

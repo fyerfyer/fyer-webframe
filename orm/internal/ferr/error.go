@@ -3,8 +3,10 @@ package ferr
 import "fmt"
 
 var (
-	ErrNoRows      = fmt.Errorf("data not found")
-	ErrTooManyRows = fmt.Errorf("too many rows")
+	ErrNoRows            = fmt.Errorf("data not found")
+	ErrTooManyRows       = fmt.Errorf("too many rows")
+	ErrInsertRowNotFound = fmt.Errorf("insert row not found")
+	ErrUpsertRowNotFound = fmt.Errorf("upsert row not found")
 )
 
 func ErrInvalidColumn(col string) error {
@@ -17,4 +19,12 @@ func ErrInvalidTag(tag string) error {
 
 func ErrInvalidSelectable(col any) error {
 	return fmt.Errorf("invalid selectable column: %v", col)
+}
+
+func ErrInvalidInsertValue(v any) error {
+	return fmt.Errorf("invalid insert value: %v", v)
+}
+
+func ErrInvalidDialect(v any) error {
+	return fmt.Errorf("invalid dialect: %v", v)
 }

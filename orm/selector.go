@@ -105,6 +105,31 @@ func (s *Selector[T]) Offset(num int) *Selector[T] {
 	return s
 }
 
+func (s *Selector[T]) GroupBy(cols ...Selectable) *Selector[T] {
+	s.builder.WriteString(" GROUP BY ")
+	if len(cols) > 1 {
+		s.builder.WriteByte('(')
+	}
+	for i := 0; i < len(cols); i++ {
+		switch col := cols[i].(type) {
+		case *Column:
+			// 注入模型信息
+			col.model = s.model
+			col.Build(s.builder)
+			if i != len(cols)-1 {
+				s.builder.WriteByte(',')
+			}
+			s.builder.WriteByte(' ')
+		default:
+			panic(ferr.ErrInvalidSelectable(col))
+		}
+	}
+	if len(cols) > 1 {
+		s.builder.WriteByte(')')
+	}
+	return s
+}
+
 func (s *Selector[T]) Build() (*Query, error) {
 	s.builder.WriteByte(';')
 	return &Query{

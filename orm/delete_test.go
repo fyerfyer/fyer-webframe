@@ -13,7 +13,7 @@ func TestDeleter_Build(t *testing.T) {
 	require.NoError(t, err)
 	defer mockDB.Close()
 
-	db, err := Open(mockDB)
+	db, err := Open(mockDB, "mysql")
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -77,7 +77,7 @@ func TestDeleter_Exec(t *testing.T) {
 	require.NoError(t, err)
 	defer mockDB.Close()
 
-	db, err := Open(mockDB)
+	db, err := Open(mockDB, "mysql")
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -127,7 +127,7 @@ func TestDeleterWithTag(t *testing.T) {
 	require.NoError(t, err)
 	defer mockDB.Close()
 
-	db, err := Open(mockDB)
+	db, err := Open(mockDB, "mysql")
 	require.NoError(t, err)
 
 	testCases := []struct {
