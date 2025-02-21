@@ -46,7 +46,7 @@ func (d *Deleter[T]) Delete(cols ...Selectable) *Deleter[T] {
 				d.builder.WriteByte(',')
 			}
 			d.builder.WriteByte(' ')
-		case Aggregate:
+		case *Aggregate:
 			col.Build(d.builder)
 			if i != len(cols)-1 {
 				d.builder.WriteByte(',')

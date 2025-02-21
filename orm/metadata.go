@@ -12,6 +12,8 @@ type model struct {
 	// fieldsMap负责原数据名称到数据库列名的映射
 	fieldsMap  map[string]*field
 	colNameMap map[string]string
+	// aliasMap负责检查别名是否存在
+	aliasMap map[string]bool
 }
 
 type field struct {
@@ -54,7 +56,8 @@ func parseModel(v any) (*model, error) {
 	return &model{
 		table:      utils.CamelToSnake(typ.Name()),
 		fieldsMap:  fields,
-		colNameMap: colNameMap, // 添加这个字段
+		colNameMap: colNameMap,
+		aliasMap:   make(map[string]bool, 4),
 	}, nil
 }
 

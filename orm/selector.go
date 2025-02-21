@@ -59,7 +59,8 @@ func (s *Selector[T]) Select(cols ...Selectable) *Selector[T] {
 				s.builder.WriteByte(',')
 			}
 			s.builder.WriteByte(' ')
-		case Aggregate:
+		case *Aggregate: // 修改类型断言
+			col.model = s.model
 			col.Build(s.builder)
 			if i != len(cols)-1 {
 				s.builder.WriteByte(',')
@@ -117,15 +118,82 @@ func (s *Selector[T]) GroupBy(cols ...Selectable) *Selector[T] {
 			col.model = s.model
 			col.Build(s.builder)
 			if i != len(cols)-1 {
-				s.builder.WriteByte(',')
+				s.builder.WriteString(", ")
 			}
-			s.builder.WriteByte(' ')
+		case *Aggregate:
+			col.model = s.model
+			col.Build(s.builder)
+			if i != len(cols)-1 {
+				s.builder.WriteString(", ")
+			}
 		default:
 			panic(ferr.ErrInvalidSelectable(col))
 		}
 	}
 	if len(cols) > 1 {
 		s.builder.WriteByte(')')
+	}
+	return s
+}
+
+func (s *Selector[T]) OrderBy(orders ...OrderBy) *Selector[T] {
+	if len(orders) == 0 {
+		return s
+	}
+
+	s.builder.WriteString(" ORDER BY ")
+	for i, order := range orders {
+		if i > 0 {
+			s.builder.WriteByte(',')
+			s.builder.WriteByte(' ')
+		}
+
+		switch expr := order.expr.(type) {
+		case *Column:
+			// 如果是列引用，允许使用别名
+			expr.model = s.model
+			expr.allowAlias = true
+			expr.Build(s.builder)
+		case *Aggregate: // 修改类型断言
+			expr.model = s.model
+			expr.Build(s.builder)
+		case RawExpr:
+			expr.Build(s.builder)
+			s.args = append(s.args, expr.args...)
+		default:
+			panic(ferr.ErrInvalidOrderBy(order.expr))
+		}
+
+		if order.desc {
+			s.builder.WriteString(" DESC")
+		}
+	}
+	return s
+}
+
+func (s *Selector[T]) Having(conditions ...Condition) *Selector[T] {
+	if len(conditions) == 0 {
+		return s
+	}
+
+	s.builder.WriteString(" HAVING ")
+	for i, condition := range conditions {
+		if i > 0 {
+			s.builder.WriteString(" AND ")
+		}
+
+		if pred, ok := condition.(Predicate); ok {
+			switch left := pred.left.(type) {
+			case *Column:
+				// 注入模型信息并允许使用别名
+				left.model = s.model
+				left.allowAlias = true
+			case *Aggregate: // 修改类型断言
+				left.model = s.model
+			}
+		}
+
+		condition.Build(s.builder, &s.args)
 	}
 	return s
 }

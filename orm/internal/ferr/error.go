@@ -28,3 +28,7 @@ func ErrInvalidInsertValue(v any) error {
 func ErrInvalidDialect(v any) error {
 	return fmt.Errorf("invalid dialect: %v", v)
 }
+
+func ErrInvalidOrderBy(v any) error {
+	return fmt.Errorf("invalid order by column: %v", v)
+}

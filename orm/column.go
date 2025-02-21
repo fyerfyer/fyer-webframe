@@ -1,14 +1,16 @@
 package orm
 
 import (
-	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 	"strings"
+
+	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 )
 
 type Column struct {
-	name  string
-	alias string
-	model *model
+	name       string
+	alias      string
+	model      *model
+	allowAlias bool
 }
 
 func Col(name string) *Column {
@@ -32,17 +34,28 @@ func (c *Column) Build(builder *strings.Builder) {
 		panic(ferr.ErrInvalidColumn(c.name))
 	}
 
-	col, ok := c.model.fieldsMap[c.name]
-	if !ok {
-		panic(ferr.ErrInvalidColumn(c.name))
+	// 先尝试从字段映射中查找
+	if col, ok := c.model.fieldsMap[c.name]; ok {
+		builder.WriteString("`" + col.colName + "`")
+		if c.alias != "" {
+			builder.WriteString(" AS `")
+			builder.WriteString(c.alias)
+			builder.WriteString("`")
+			// 把别名加入到模型中（移到这里）
+			c.model.aliasMap[c.alias] = true
+		}
+		return
 	}
 
-	builder.WriteString("`" + col.colName + "`")
-	if c.alias != "" {
-		builder.WriteString(" AS `")
-		builder.WriteString(c.alias)
-		builder.WriteString("`")
+	// 如果允许使用别名，则尝试从别名映射中查找
+	if c.allowAlias {
+		if ok := c.model.aliasMap[c.name]; ok {
+			builder.WriteString("`" + c.name + "`")
+			return
+		}
 	}
+
+	panic(ferr.ErrInvalidColumn(c.name))
 }
 
 func (c *Column) BuildWithoutQuote(builder *strings.Builder) {
