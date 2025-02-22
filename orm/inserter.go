@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"context"
 	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 	"reflect"
 	"strings"
@@ -11,14 +12,26 @@ type Inserter[T any] struct {
 	table   string
 	values  []any
 	model   *model
-	db      *DB
+	layer   Layer
 }
 
-func RegisterInserter[T any](db *DB) *Inserter[T] {
+func RegisterInserter[T any](layer Layer) *Inserter[T] {
 	var val T
-	m, err := db.getModel(val)
-	if err != nil {
-		panic(err)
+
+	var m *model
+	switch layer := layer.(type) {
+	case *DB:
+		var err error
+		m, err = layer.getModel(val)
+		if err != nil {
+			panic(err)
+		}
+	case *Tx:
+		var err error
+		m, err = layer.db.getModel(val)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	// 结构体或者结构体指针实现TableNamer接口即可
@@ -34,7 +47,7 @@ func RegisterInserter[T any](db *DB) *Inserter[T] {
 	return &Inserter[T]{
 		builder: &strings.Builder{},
 		model:   m,
-		db:      db,
+		layer:   layer,
 	}
 }
 
@@ -105,14 +118,15 @@ func (i *Inserter[T]) Insert(cols []string, vals ...*T) *Inserter[T] {
 	return i
 }
 
-
 func (i *Inserter[T]) Upsert(conflictCols []*Column, cols []*Column) *Inserter[T] {
-	dialect, ok := i.db.dialect.(interface{
+	db := i.layer.getDB()
+
+	dialect, ok := db.dialect.(interface {
 		BuildUpsert(builder *strings.Builder, conflictCols []*Column, cols []*Column)
 		setModel(m *model)
 	})
 	if !ok {
-		panic(ferr.ErrInvalidDialect(i.db.dialect))
+		panic(ferr.ErrInvalidDialect(db.dialect))
 	}
 
 	// 注入模型信息
@@ -121,12 +135,31 @@ func (i *Inserter[T]) Upsert(conflictCols []*Column, cols []*Column) *Inserter[T
 	return i
 }
 
-func (s *Inserter[T]) Build() (*Query, error) {
-	s.builder.WriteByte(';')
+func (i *Inserter[T]) Build() (*Query, error) {
+	i.builder.WriteByte(';')
 
 	return &Query{
-		SQL:  s.builder.String(),
-		Args: s.values,
+		SQL:  i.builder.String(),
+		Args: i.values,
 	}, nil
 }
 
+func (i *Inserter[T]) Exec(ctx context.Context) (Result, error) {
+	q, err := i.Build()
+	if err != nil {
+		return Result{}, err
+	}
+
+	qc := &QueryContext{
+		QueryType: "exec",
+		Query:     q,
+		Model:     i.model,
+		Builder:   i,
+	}
+
+	res, err := i.layer.HandleQuery(ctx, qc)
+	return Result{
+		res: res.Result.res,
+		err: err,
+	}, err
+}

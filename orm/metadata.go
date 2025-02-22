@@ -25,7 +25,7 @@ func parseModel(v any) (*model, error) {
 
 	// 如果是指针类型，获取其元素类型
 	// 只支持一重指针
-	if typ.Kind() != reflect.Struct {
+	for typ.Kind() != reflect.Struct {
 		typ = typ.Elem()
 	}
 

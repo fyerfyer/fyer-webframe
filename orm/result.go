@@ -7,6 +7,11 @@ type Result struct {
 	err error
 }
 
+type ResultHandler interface {
+	LastInsertId() (int64, error)
+	RowsAffected() (int64, error)
+}
+
 func (r Result) LastInsertId() (int64, error) {
 	if r.err != nil {
 		return 0, r.err

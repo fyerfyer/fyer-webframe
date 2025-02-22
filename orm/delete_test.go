@@ -97,9 +97,9 @@ func TestDeleter_Exec(t *testing.T) {
 		{
 			name: "delete with limit",
 			q: RegisterDeleter[TestModel](db).Delete().
-				Where(Col("Age").Gt(18)).
+				Where(Col("ID").Gt(18)).
 				Limit(10),
-			query: "DELETE FROM `test_model` WHERE `age` > \\? LIMIT 10",
+			query: "DELETE FROM `test_model` WHERE `id` > \\? LIMIT 10",
 			affected: 10,
 		},
 	}

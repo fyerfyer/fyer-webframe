@@ -71,38 +71,38 @@ func (c *Column) BuildWithoutQuote(builder *strings.Builder) {
 	builder.WriteString(col.colName)
 }
 
-func (c *Column) Eq(arg any) Predicate {
-	return Predicate{
+func (c *Column) Eq(arg any) *Predicate {
+	return &Predicate{
 		left:  c,
 		op:    opEQ,
 		right: valueOf(arg),
 	}
 }
 
-func (c *Column) Gt(arg any) Predicate {
-	return Predicate{
+func (c *Column) Gt(arg any) *Predicate {
+	return &Predicate{
 		left:  c,
 		op:    opGT,
 		right: valueOf(arg),
 	}
 }
 
-func (c *Column) IsNull() Predicate {
-	return Predicate{
+func (c *Column) IsNull() *Predicate {
+	return &Predicate{
 		left: c,
 		op:   opISNULL,
 	}
 }
 
-func (c *Column) NotNull() Predicate {
-	return Predicate{
+func (c *Column) NotNull() *Predicate {
+	return &Predicate{
 		left: c,
 		op:   opNOTNULL,
 	}
 }
 
-func NOT(pred Predicate) Predicate {
-	return Predicate{
+func NOT(pred *Predicate) *Predicate {
+	return &Predicate{
 		op:    opNOT,
 		right: pred,
 	}

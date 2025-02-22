@@ -1,8 +1,6 @@
 package orm
 
 import (
-	"fmt"
-	"github.com/fyerfyer/fyer-webframe/orm/internal/utils"
 	"strings"
 )
 
@@ -15,60 +13,69 @@ type Predicate struct {
 	left  Expression
 	op    Op
 	right Expression
+	model *model
 }
 
-func (p Predicate) expr() {}
+// buildExpr 构建表达式,处理不同类型的表达式构建
+func (p *Predicate) buildExpr(expr Expression, builder *strings.Builder, args *[]any) {
+	switch e := expr.(type) {
+	case *Column:
+		e.model = p.model
+		e.Build(builder)
+	case *Aggregate:
+		e.model = p.model
+		e.Build(builder)
+	case *Value:
+		builder.WriteByte('?')
+		*args = append(*args, e.val)
+	case *Predicate:
+		e.model = p.model
+		builder.WriteByte('(')
+		e.Build(builder, args)
+		builder.WriteByte(')')
+	default:
+		builder.WriteByte('?')
+		*args = append(*args, expr)
+	}
+}
 
-func (p Predicate) Build(builder *strings.Builder, args *[]any) {
+func (p *Predicate) expr() {}
+
+func (p *Predicate) Build(builder *strings.Builder, args *[]any) {
 	switch p.op.Type {
 	case OpUnary:
-		// 一元运算符
-		if col, ok := p.left.(*Column); ok {
-			builder.WriteString("`")
-			// 优先使用模型中的列名
-			if col.model != nil {
-				if fd, ok := col.model.fieldsMap[col.name]; ok {
-					builder.WriteString(fd.colName)
-				} else {
-					builder.WriteString(utils.CamelToSnake(col.name))
-				}
-			} else {
-				builder.WriteString(utils.CamelToSnake(col.name))
-			}
-			builder.WriteString("`")
-			builder.WriteString(" ")
+		// 一元运算符: NOT, IS NULL 等
+		if p.left == nil && p.right == nil {
+			panic("left and right expressions cannot be nil for unary operator")
+		}
+		if p.left != nil {
+			p.buildExpr(p.left, builder, args)
+			builder.WriteByte(' ')
+		}
+		builder.WriteString(p.op.Keyword)
+		if p.right != nil {
+			builder.WriteByte(' ')
+			p.buildExpr(p.right, builder, args)
 		}
 
-		builder.WriteString(p.op.Keyword)
-		if pred, ok := p.right.(Condition); ok {
-			builder.WriteString(" ")
-			pred.Build(builder, args)
-		}
 	case OpBinary:
-		// 处理左侧表达式
-		switch left := p.left.(type) {
-		case *Column:
-			left.Build(builder)
-		case *Aggregate: // 修改类型断言
-			left.Build(builder)
-		default:
-			panic(fmt.Errorf("invalid left expression: %v", left))
+		// 二元运算符: =, >, < 等
+		if p.left == nil {
+			panic("left expression cannot be nil for binary operator")
 		}
 
-		builder.WriteString(" ")
+		// 处理左表达式
+		p.buildExpr(p.left, builder, args)
+
+		// 添加操作符
+		builder.WriteByte(' ')
 		builder.WriteString(p.op.Keyword)
-		builder.WriteString(" ")
+		builder.WriteByte(' ')
 
-		// 处理右侧表达式
-		if pred, ok := p.right.(Condition); ok {
-			pred.Build(builder, args)
-		} else {
-			builder.WriteString("?")
-			if v, ok := p.right.(*Value); ok {
-				*args = append(*args, v.val)
-			} else {
-				*args = append(*args, p.right)
-			}
-		}
+		// 处理右表达式
+		p.buildExpr(p.right, builder, args)
+
+	default:
+		panic("invalid operator type")
 	}
 }

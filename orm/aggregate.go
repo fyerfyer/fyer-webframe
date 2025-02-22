@@ -106,16 +106,16 @@ func (a *Aggregate) Build(builder *strings.Builder) {
 	}
 }
 
-func (a *Aggregate) Eq(arg any) Predicate {
-	return Predicate{
+func (a *Aggregate) Eq(arg any) *Predicate {
+	return &Predicate{
 		left:  a,
 		op:    opEQ,
 		right: valueOf(arg),
 	}
 }
 
-func (a *Aggregate) Gt(arg any) Predicate {
-	return Predicate{
+func (a *Aggregate) Gt(arg any) *Predicate {
+	return &Predicate{
 		left:  a,
 		op:    opGT,
 		right: valueOf(arg),

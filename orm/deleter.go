@@ -2,7 +2,6 @@ package orm
 
 import (
 	"context"
-	"database/sql"
 	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 	"strconv"
 	"strings"
@@ -12,20 +11,32 @@ type Deleter[T any] struct {
 	builder *strings.Builder
 	model   *model
 	args    []any
-	db      *DB
+	layer   Layer
 }
 
-func RegisterDeleter[T any](db *DB) *Deleter[T] {
+func RegisterDeleter[T any](layer Layer) *Deleter[T] {
 	var val T
-	m, err := db.getModel(val)
-	if err != nil {
-		panic(err)
+
+	var m *model
+	switch layer := layer.(type) {
+	case *DB:
+		var err error
+		m, err = layer.getModel(val)
+		if err != nil {
+			panic(err)
+		}
+	case *Tx:
+		var err error
+		m, err = layer.db.getModel(val)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	return &Deleter[T]{
 		builder: &strings.Builder{},
 		model:   m,
-		db:      db,
+		layer:   layer,
 	}
 }
 
@@ -68,7 +79,7 @@ func (d *Deleter[T]) Delete(cols ...Selectable) *Deleter[T] {
 func (d *Deleter[T]) Where(conditions ...Condition) *Deleter[T] {
 	d.builder.WriteString(" WHERE ")
 	for i := 0; i < len(conditions); i++ {
-		if pred, ok := conditions[i].(Predicate); ok {
+		if pred, ok := conditions[i].(*Predicate); ok {
 			if col, ok := pred.left.(*Column); ok {
 				// 注入模型信息
 				col.model = d.model
@@ -101,10 +112,22 @@ func (d *Deleter[T]) Build() (*Query, error) {
 }
 
 // Exec 添加执行方法
-func (d *Deleter[T]) Exec(ctx context.Context) (sql.Result, error) {
+func (d *Deleter[T]) Exec(ctx context.Context) (Result, error) {
 	q, err := d.Build()
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
-	return d.db.sqlDB.ExecContext(ctx, q.SQL, q.Args...)
+
+	qc := &QueryContext{
+		QueryType: "exec",
+		Query:     q,
+		Model:     d.model,
+		Builder:   d,
+	}
+
+	res, err := d.layer.HandleQuery(ctx, qc)
+	return Result{
+		res: res.Result.res,
+		err: err,
+	}, err
 }

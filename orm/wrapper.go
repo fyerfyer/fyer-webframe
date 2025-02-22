@@ -1,7 +1,5 @@
 package orm
 
-import "strings"
-
 // Expression 表达式接口
 type Expression interface {
 	expr()
@@ -15,11 +13,6 @@ type Selectable interface {
 // As 别名接口
 type As interface {
 	As(alias string) Selectable
-}
-
-// Buildable 构建SQL的接口
-type Buildable interface {
-	Build(builder *strings.Builder)
 }
 
 // Value 用于封装基础类型，使其满足Expression接口

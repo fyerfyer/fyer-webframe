@@ -3,6 +3,7 @@ package orm
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -15,22 +16,32 @@ type Selector[T any] struct {
 	table   string
 	model   *model
 	args    []any
-	db      *DB
+	layer   Layer
 }
 
-func RegisterSelector[T any](db *DB) *Selector[T] {
+func RegisterSelector[T any](layer Layer) *Selector[T] {
 	var val T
-	m, err := db.getModel(val)
-	if err != nil {
-		panic(err)
+
+	var m *model
+	switch layer := layer.(type) {
+	case *DB:
+		var err error
+		m, err = layer.getModel(val)
+		if err != nil {
+			panic(err)
+		}
+	case *Tx:
+		var err error
+		m, err = layer.db.getModel(val)
+		if err != nil {
+			panic(err)
+		}
 	}
 
-	// 结构体或者结构体指针实现TableNameInterface接口即可
+	// 处理表名
 	if tablename, ok := any(val).(TableNamer); ok {
 		m.table = tablename.TableName()
 	}
-
-	// 尝试取指针
 	if tablename, ok := any(&val).(TableNamer); ok {
 		m.table = tablename.TableName()
 	}
@@ -38,7 +49,7 @@ func RegisterSelector[T any](db *DB) *Selector[T] {
 	return &Selector[T]{
 		builder: &strings.Builder{},
 		model:   m,
-		db:      db,
+		layer:   layer,
 	}
 }
 
@@ -82,11 +93,8 @@ func (s *Selector[T]) Select(cols ...Selectable) *Selector[T] {
 func (s *Selector[T]) Where(conditions ...Condition) *Selector[T] {
 	s.builder.WriteString(" WHERE ")
 	for i := 0; i < len(conditions); i++ {
-		if pred, ok := conditions[i].(Predicate); ok {
-			if col, ok := pred.left.(*Column); ok {
-				// 注入模型信息
-				col.model = s.model
-			}
+		if pred, ok := conditions[i].(*Predicate); ok {
+			pred.model = s.model
 		}
 		conditions[i].Build(s.builder, &s.args)
 		if i != len(conditions)-1 {
@@ -182,7 +190,8 @@ func (s *Selector[T]) Having(conditions ...Condition) *Selector[T] {
 			s.builder.WriteString(" AND ")
 		}
 
-		if pred, ok := condition.(Predicate); ok {
+		if pred, ok := condition.(*Predicate); ok {
+			pred.model = s.model
 			switch left := pred.left.(type) {
 			case *Column:
 				// 注入模型信息并允许使用别名
@@ -242,10 +251,25 @@ func (s *Selector[T]) Get(ctx context.Context) (*T, error) {
 		return nil, err
 	}
 
-	rows, err := s.db.sqlDB.QueryContext(ctx, q.SQL, q.Args...)
+	// 构建查询上下文
+	qc := &QueryContext{
+		QueryType: "query",
+		Query:     q,
+		Model:     s.model,
+		Builder:   s,
+	}
+
+	// 确保 layer 初始化了 handler
+	if s.layer.getHandler() == nil {
+		return nil, fmt.Errorf("handler not initialized")
+	}
+
+	res, err := s.layer.HandleQuery(ctx, qc)
 	if err != nil {
 		return nil, err
 	}
+
+	rows := res.Rows
 	defer rows.Close()
 
 	if !rows.Next() {
@@ -271,13 +295,22 @@ func (s *Selector[T]) GetMulti(ctx context.Context) ([]*T, error) {
 		return nil, err
 	}
 
-	rows, err := s.db.sqlDB.QueryContext(ctx, q.SQL, q.Args...)
+	qc := &QueryContext{
+		QueryType: "query",
+		Query:     q,
+		Model:     s.model,
+		Builder:   s,
+	}
+
+	res, err := s.layer.HandleQuery(ctx, qc)
 	if err != nil {
 		return nil, err
 	}
+
+	rows := res.Rows
 	defer rows.Close()
 
-	var result []*T
+	result := make([]*T, 0)
 	for rows.Next() {
 		t, err := s.scanRow(rows)
 		if err != nil {
@@ -286,9 +319,5 @@ func (s *Selector[T]) GetMulti(ctx context.Context) ([]*T, error) {
 		result = append(result, t)
 	}
 
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return result, rows.Err()
 }
