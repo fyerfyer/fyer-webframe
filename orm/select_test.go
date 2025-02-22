@@ -39,6 +39,25 @@ func (t *TestModelWithTableNameInterfacePtr) TableName() string {
 	return "test_model"
 }
 
+// Join测试用例
+// OrderDetail 订单详情
+type OrderDetail struct {
+	OrderID  int64 `orm:"column_name:order_id"`
+	ItemID   int64 `orm:"column_name:item_id"`
+	Quantity int32
+	Price    float64
+}
+
+// Order 订单
+type Order struct {
+	ID         int64  `orm:"column_name:id"`
+	UserID     int64  `orm:"column_name:user_id"`
+	OrderNo    string `orm:"column_name:order_no"`
+	Status     int32
+	Amount     float64
+	CreateTime sql.NullTime `orm:"column_name:create_time"`
+}
+
 type TestModelWithTag struct {
 	ID   int    `orm:"column_name:testid"`
 	Name string `orm:"column_name:testname"`
@@ -737,6 +756,128 @@ func TestSelector_Having(t *testing.T) {
 			wantQuery: &Query{
 				SQL:  "SELECT `name`, COUNT(`id`) AS `count`, AVG(`age`) AS `avg_age` FROM `test_model` GROUP BY `name` HAVING COUNT(`id`) > ? AND AVG(`age`) > ?;",
 				Args: []any{100, 18},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			query, err := tc.q.Build()
+			assert.Equal(t, tc.wantErr, err)
+			if err != nil {
+				return
+			}
+			assert.Equal(t, tc.wantQuery, query)
+		})
+	}
+}
+
+func TestSelector_Join(t *testing.T) {
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB, "mysql")
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name      string
+		q         QueryBuilder
+		wantQuery *Query
+		wantErr   error
+	}{
+		{
+			name: "inner join",
+			q: RegisterSelector[OrderDetail](db).
+				Select(Col("OrderID"), Col("ItemID"), FromTable(&Order{}, Col("Amount"))).
+				From("order_detail").
+				Join(InnerJoin, Table("order")).
+				On(FromTable(&OrderDetail{}, Col("OrderID")).
+					Eq(FromTable(&Order{}, Col("ID")))),
+			wantQuery: &Query{
+				SQL: "SELECT `order_id`, `item_id`, `order`.`amount` FROM `order_detail` " +
+					"INNER JOIN `order` ON `order_detail`.`order_id` = `order`.`id`;",
+				Args: nil,
+			},
+		},
+		{
+			name: "left join",
+			q: RegisterSelector[OrderDetail](db).
+				Select(Col("OrderID"), FromTable(&Order{}, Col("Amount"))).
+				From("order_detail").
+				Join(LeftJoin, Table("order")).
+				On(FromTable(&OrderDetail{}, Col("OrderID")).
+					Eq(FromTable(&Order{}, Col("ID")))),
+			wantQuery: &Query{
+				SQL: "SELECT `order_id`, `order`.`amount` FROM `order_detail` " +
+					"LEFT JOIN `order` ON `order_detail`.`order_id` = `order`.`id`;",
+				Args: nil,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			query, err := tc.q.Build()
+			assert.Equal(t, tc.wantErr, err)
+			if err != nil {
+				return
+			}
+			assert.Equal(t, tc.wantQuery, query)
+		})
+	}
+}
+
+func TestSelector_SubQuery(t *testing.T) {
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB, "mysql")
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name      string
+		q         *Selector[Order]
+		wantQuery *Query
+		wantErr   error
+	}{
+		{
+			name: "subquery in from",
+			q: RegisterSelector[Order](db).
+				Select(Col("ID"), Col("Amount")).
+				From(
+					RegisterSelector[Order](db).
+						Select(Col("ID"), Col("Amount")).
+						From("order").
+						Where(Col("Amount").Gt(100)).
+						AsSubQuery("t"),
+				),
+			wantQuery: &Query{
+				SQL: "SELECT `id`, `amount` FROM " +
+					"(SELECT `id`, `amount` FROM `order` WHERE `amount` > ?) AS t;",
+				Args: []any{100},
+			},
+		},
+		{
+			name: "subquery in join",
+			q: RegisterSelector[Order](db).
+				Select(Col("ID"), FromTable(Order{}, FromTable("t", Col("avg_amount")))).
+				From("order").
+				Join(InnerJoin,
+					RegisterSelector[Order](db).
+						Select(Col("UserID"), Avg("Amount").As("avg_amount")).
+						From("order").
+						GroupBy(Col("UserID")).
+						AsSubQuery("t"),
+				).
+				On(FromTable(&Order{}, Col("UserID")).Eq(FromTable("t", Col("UserID")))),
+			wantQuery: &Query{
+				SQL: "SELECT `id`, `t`.`avg_amount` FROM `order` " +
+					"INNER JOIN (SELECT `user_id`, AVG(`amount`) AS `avg_amount` " +
+					"FROM `order` GROUP BY `user_id`) AS t " +
+					"ON `order`.`user_id` = `t`.`user_id`;",
+				Args: nil,
 			},
 		},
 	}

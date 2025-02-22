@@ -21,6 +21,18 @@ func ErrInvalidSelectable(col any) error {
 	return fmt.Errorf("invalid selectable column: %v", col)
 }
 
+func ErrInvalidSubqueryColumn(col any) error {
+	return fmt.Errorf("invalid subquery column: %v", col)
+}
+
+func ErrInvalidJoinCondition(cond any) error {
+	return fmt.Errorf("invalid join condition: %v", cond)
+}
+
+func ErrInvalidTableReference(table any) error {
+	return fmt.Errorf("invalid table reference: %v", table)
+}
+
 func ErrInvalidInsertValue(v any) error {
 	return fmt.Errorf("invalid insert value: %v", v)
 }
