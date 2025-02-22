@@ -1,8 +1,8 @@
 package session
 
 import (
-	"github.com/fyerfyer/fyer-webframe/session"
 	"github.com/fyerfyer/fyer-webframe/web"
+	"github.com/fyerfyer/fyer-webframe/web/session"
 	"github.com/google/uuid"
 )
 
