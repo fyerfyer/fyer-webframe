@@ -99,7 +99,7 @@ func (a *Aggregate) Build(builder *strings.Builder) {
 
 	builder.WriteString(")")
 	if a.alias != "" {
-		a.model.aliasMap[a.alias] = true
+		a.model.colAliasMap[a.alias] = true
 		builder.WriteString(" AS `")
 		builder.WriteString(a.alias)
 		builder.WriteString("`")

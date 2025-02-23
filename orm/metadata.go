@@ -8,12 +8,11 @@ import (
 )
 
 type model struct {
-	table string
-	// fieldsMap负责原数据名称到数据库列名的映射
-	fieldsMap  map[string]*field
-	colNameMap map[string]string
-	// aliasMap负责检查别名是否存在
-	aliasMap map[string]bool
+	table         string
+	fieldsMap     map[string]*field
+	colNameMap    map[string]string
+	colAliasMap   map[string]bool
+	tableAliasMap map[string]string
 }
 
 type field struct {
@@ -54,10 +53,11 @@ func parseModel(v any) (*model, error) {
 	}
 
 	return &model{
-		table:      utils.CamelToSnake(typ.Name()),
-		fieldsMap:  fields,
-		colNameMap: colNameMap,
-		aliasMap:   make(map[string]bool, 4),
+		table:       utils.CamelToSnake(typ.Name()),
+		fieldsMap:   fields,
+		colNameMap:  colNameMap,
+		colAliasMap: make(map[string]bool, 4),
+		tableAliasMap: make(map[string]string, 4),
 	}, nil
 }
 

@@ -11,12 +11,17 @@ import (
 	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 )
 
+var sqlWithFrom = ""
+
 type Selector[T any] struct {
-	builder *strings.Builder
-	table   string
-	model   *model
-	args    []any
-	layer   Layer
+	builder       *strings.Builder
+	table         string
+	model         *model
+	subqueryCache *map[string]map[string]bool // 子查询缓存，只需要查询列名是否存在即可
+	cols          []string                    // 查询列，用于构建子查询缓存
+	delayCols     []*Column                   // 延迟处理的子查询列
+	args          []any
+	layer         Layer
 }
 
 func RegisterSelector[T any](layer Layer) *Selector[T] {
@@ -54,8 +59,9 @@ func RegisterSelector[T any](layer Layer) *Selector[T] {
 }
 
 func (s *Selector[T]) Select(cols ...Selectable) *Selector[T] {
+	sqlWithFrom = "FROM " + "`" + s.model.table + "`"
 	if cols == nil {
-		s.builder.WriteString("SELECT * FROM " + "`" + s.model.table + "`")
+		s.builder.WriteString("SELECT * " + sqlWithFrom)
 		return s
 	}
 
@@ -63,9 +69,30 @@ func (s *Selector[T]) Select(cols ...Selectable) *Selector[T] {
 	for i := 0; i < len(cols); i++ {
 		switch col := cols[i].(type) {
 		case *Column:
-			// 注入模型信息
-			col.model = s.model
+			// 如果是列引用，则需要解析并传入对应结构体
+			// 注意：子查询传入的是字符串、并且col的table名称已经设置好，这种情况不需要解析，等到延迟验证那步再验证就行
+			if col.table == "" {
+				if col.tableStruct != nil {
+					var err error
+					col.fromModel, err = s.layer.getModel(col.tableStruct)
+					if err != nil {
+						panic(err)
+					}
+					col.table = col.fromModel.table
+				} else {
+					// 注入模型信息
+					col.model = s.model
+				}
+			}
 			col.Build(s.builder)
+			if col.alias != "" {
+				s.cols = append(s.cols, col.alias)
+			} else {
+				s.cols = append(s.cols, col.name)
+			}
+			if col.shouldDelay {
+				s.delayCols = append(s.delayCols, col)
+			}
 			if i != len(cols)-1 {
 				s.builder.WriteByte(',')
 			}
@@ -73,6 +100,9 @@ func (s *Selector[T]) Select(cols ...Selectable) *Selector[T] {
 		case *Aggregate: // 修改类型断言
 			col.model = s.model
 			col.Build(s.builder)
+			if col.alias != "" {
+				s.cols = append(s.cols, col.alias)
+			}
 			if i != len(cols)-1 {
 				s.builder.WriteByte(',')
 			}
@@ -86,7 +116,38 @@ func (s *Selector[T]) Select(cols ...Selectable) *Selector[T] {
 		}
 	}
 
-	s.builder.WriteString("FROM " + "`" + s.model.table + "`")
+	s.builder.WriteString(sqlWithFrom)
+	return s
+}
+
+func (s *Selector[T]) From(table any) *Selector[T] {
+	if sqlWithFrom != "" {
+		sqlWithoutFrom := strings.TrimSuffix(s.builder.String(), sqlWithFrom)
+		s.builder.Reset()
+		s.builder.WriteString(sqlWithoutFrom)
+	}
+	switch table := table.(type) {
+
+	// 传入字符串的话只有一种可能性：别名
+	case string:
+		return s.from(&Value{val: table})
+	case TableReference:
+		return s.from(table)
+	default:
+		panic(ferr.ErrInvalidTableReference(table))
+	}
+}
+
+func (s *Selector[T]) from(table TableReference) *Selector[T] {
+	s.builder.WriteString("FROM ")
+	switch table := table.(type) {
+	case *SubQuery[T]:
+		table.Build(s.builder, &s.args)
+	case *Join:
+		table.Build(s.builder, &s.args)
+	case *Value:
+		s.builder.WriteString("`" + table.val.(string) + "`")
+	}
 	return s
 }
 
@@ -125,6 +186,9 @@ func (s *Selector[T]) GroupBy(cols ...Selectable) *Selector[T] {
 			// 注入模型信息
 			col.model = s.model
 			col.Build(s.builder)
+			if col.shouldDelay {
+				s.delayCols = append(s.delayCols, col)
+			}
 			if i != len(cols)-1 {
 				s.builder.WriteString(", ")
 			}
@@ -207,7 +271,96 @@ func (s *Selector[T]) Having(conditions ...Condition) *Selector[T] {
 	return s
 }
 
+func (s *Selector[T]) Join(joinType JoinType, target TableReference) *Selector[T] {
+	join := &Join{
+		JoinType: string(joinType),
+		Target:   target,
+	}
+
+	res := join.Build(s.builder, &s.args)
+	if queryCache, ok := res.(*map[string]map[string]bool); ok {
+		s.subqueryCache = queryCache
+	}
+	return s
+}
+
+func (s *Selector[T]) On(conditions ...Condition) *Selector[T] {
+	s.builder.WriteString(" ON ")
+	for index, condition := range conditions {
+		switch cond := condition.(type) {
+		case *Predicate:
+			cond.model = s.model
+
+			// 在build之前先做一些处理
+			// 如果左边或者右边有FromTable的column的话，先给它注入模型信息
+			// 其实这个逻辑也可以放到build里面，但是我不想把db注入到model，感觉很奇怪
+			if leftCol, ok := cond.left.(*Column); ok {
+				if leftCol.tableStruct != nil {
+					var err error
+					leftCol.fromModel, err = s.layer.getModel(leftCol.tableStruct)
+					if err != nil {
+						panic(err)
+					}
+					leftCol.table = leftCol.fromModel.table
+				}
+			}
+
+			if rightCol, ok := cond.right.(*Column); ok {
+				if rightCol.tableStruct != nil {
+					var err error
+					rightCol.fromModel, err = s.layer.getModel(rightCol.tableStruct)
+					if err != nil {
+						panic(err)
+					}
+					rightCol.table = rightCol.fromModel.table
+				}
+			}
+			cond.Build(s.builder, &s.args)
+			if index != len(conditions)-1 {
+				s.builder.WriteString(" AND ")
+			}
+		default:
+			panic(ferr.ErrInvalidJoinCondition(cond))
+		}
+	}
+
+	return s
+}
+
+func (s *Selector[T]) Using(cols ...string) *Selector[T] {
+	s.builder.WriteString(" USING (")
+	for i, col := range cols {
+		s.builder.WriteString(col)
+		if i != len(cols)-1 {
+			s.builder.WriteString(", ")
+		}
+	}
+	s.builder.WriteByte(')')
+	return s
+}
+
+func (s *Selector[T]) AsSubQuery(alias string) *SubQuery[T] {
+	return &SubQuery[T]{
+		selector: s,
+		alias:    alias,
+	}
+}
+
 func (s *Selector[T]) Build() (*Query, error) {
+	// 在build前先检查延迟处理的列
+	for _, col := range s.delayCols {
+		mp := *s.subqueryCache
+		c, ok := mp[col.table]
+		if !ok {
+			return nil, ferr.ErrInvalidSubqueryColumn(col.table + "." + col.name)
+		}
+
+		_, ok = c[col.name]
+		if !ok {
+			return nil, ferr.ErrInvalidSubqueryColumn(col.table + "." + col.name)
+		}
+	}
+
 	s.builder.WriteByte(';')
 	return &Query{
 		SQL:  s.builder.String(),

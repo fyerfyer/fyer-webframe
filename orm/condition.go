@@ -20,6 +20,9 @@ type Predicate struct {
 func (p *Predicate) buildExpr(expr Expression, builder *strings.Builder, args *[]any) {
 	switch e := expr.(type) {
 	case *Column:
+		if e.tableStruct != nil {
+
+		}
 		e.model = p.model
 		e.Build(builder)
 	case *Aggregate:

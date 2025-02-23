@@ -8,11 +8,11 @@ import (
 
 // DB 是orm用来管理数据库连接和缓存之类持久化内容的结构体
 type DB struct {
-	model       *modelCache  // 元数据缓存
-	sqlDB       *sql.DB      // 数据库连接
-	dialect     Dialect      // 数据库方言
-	handler     Handler      // 处理器
-	middlewares []Middleware // 中间件
+	model         *modelCache  // 元数据缓存
+	sqlDB         *sql.DB      // 数据库连接
+	dialect       Dialect      // 数据库方言
+	handler       Handler      // 处理器
+	middlewares   []Middleware // 中间件
 }
 
 // queryContext 查询
