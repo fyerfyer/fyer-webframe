@@ -75,8 +75,45 @@ func (p *Predicate) Build(builder *strings.Builder, args *[]any) {
 		builder.WriteString(p.op.Keyword)
 		builder.WriteByte(' ')
 
+		// 特殊处理 IN/NOT IN
+		if p.op == opIN || p.op == opNOTIN {
+			builder.WriteByte('(')
+			if val, ok := p.right.(*Value); ok {
+				if vals, ok := val.val.([]any); ok {
+					for i, v := range vals {
+						builder.WriteByte('?')
+						*args = append(*args, v)
+						if i < len(vals)-1 {
+							builder.WriteString(", ")
+						}
+					}
+				}
+			}
+			builder.WriteByte(')')
+			return
+		}
+
 		// 处理右表达式
 		p.buildExpr(p.right, builder, args)
+
+	case OpTernary:
+		// 处理 BETWEEN/NOT BETWEEN
+		if p.op == opBETWEEN || p.op == opNOTBETWEEN {
+			p.buildExpr(p.left, builder, args)
+			builder.WriteByte(' ')
+			builder.WriteString(p.op.Keyword)
+			builder.WriteByte(' ')
+			if val, ok := p.right.(*Value); ok {
+				if vals, ok := val.val.([]any); ok && len(vals) == 2 {
+					builder.WriteByte('?')
+					*args = append(*args, vals[0])
+					builder.WriteString(" AND ")
+					builder.WriteByte('?')
+					*args = append(*args, vals[1])
+				}
+			}
+			return
+		}
 
 	default:
 		panic("invalid operator type")

@@ -69,7 +69,7 @@ func CamelToSnake(camelStr string) string {
 
 //func main() {
 //	testCases := []string{
-//		"TestModel",
+//		"TestModel2",
 //		"testModel",
 //		"TestABCModel",
 //		"HTTPHandler",

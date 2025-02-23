@@ -158,6 +158,78 @@ func (c *Column) NotNull() *Predicate {
 	}
 }
 
+func (c *Column) Gte(arg any) *Predicate {
+	return &Predicate{
+		left:  c,
+		op:    opGTE,
+		right: valueOf(arg),
+	}
+}
+
+func (c *Column) Lt(arg any) *Predicate {
+	return &Predicate{
+		left:  c,
+		op:    opLT,
+		right: valueOf(arg),
+	}
+}
+
+func (c *Column) Lte(arg any) *Predicate {
+	return &Predicate{
+		left:  c,
+		op:    opLTE,
+		right: valueOf(arg),
+	}
+}
+
+func (c *Column) Like(pattern string) *Predicate {
+	return &Predicate{
+		left:  c,
+		op:    opLIKE,
+		right: valueOf(pattern),
+	}
+}
+
+func (c *Column) NotLike(pattern string) *Predicate {
+	return &Predicate{
+		left:  c,
+		op:    opNOTLIKE,
+		right: valueOf(pattern),
+	}
+}
+
+func (c *Column) In(vals ...any) *Predicate {
+	return &Predicate{
+		left:  c,
+		op:    opIN,
+		right: valueOf(vals),
+	}
+}
+
+func (c *Column) NotIn(vals ...any) *Predicate {
+	return &Predicate{
+		left:  c,
+		op:    opNOTIN,
+		right: valueOf(vals),
+	}
+}
+
+func (c *Column) Between(start, end any) *Predicate {
+	return &Predicate{
+		left:  c,
+		op:    opBETWEEN,
+		right: valueOf([]any{start, end}),
+	}
+}
+
+func (c *Column) NotBetween(start, end any) *Predicate {
+	return &Predicate{
+		left:  c,
+		op:    opNOTBETWEEN,
+		right: valueOf([]any{start, end}),
+	}
+}
+
 func NOT(pred *Predicate) *Predicate {
 	return &Predicate{
 		op:    opNOT,

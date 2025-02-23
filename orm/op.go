@@ -16,9 +16,18 @@ const (
 
 // 预定义操作符
 var (
-	opEQ      = Op{Type: OpBinary, Keyword: "="}
-	opGT      = Op{Type: OpBinary, Keyword: ">"}
-	opNOT     = Op{Type: OpUnary, Keyword: "NOT"}
-	opISNULL  = Op{Type: OpUnary, Keyword: "IS NULL"}
-	opNOTNULL = Op{Type: OpUnary, Keyword: "IS NOT NULL"}
+	opEQ         = Op{Type: OpBinary, Keyword: "="}
+	opGT         = Op{Type: OpBinary, Keyword: ">"}
+	opNOT        = Op{Type: OpUnary, Keyword: "NOT"}
+	opISNULL     = Op{Type: OpUnary, Keyword: "IS NULL"}
+	opNOTNULL    = Op{Type: OpUnary, Keyword: "IS NOT NULL"}
+	opLTE        = Op{Type: OpBinary, Keyword: "<="}
+	opLT         = Op{Type: OpBinary, Keyword: "<"}
+	opGTE        = Op{Type: OpBinary, Keyword: ">="}
+	opLIKE       = Op{Type: OpBinary, Keyword: "LIKE"}
+	opNOTLIKE    = Op{Type: OpBinary, Keyword: "NOT LIKE"}
+	opIN         = Op{Type: OpBinary, Keyword: "IN"}
+	opNOTIN      = Op{Type: OpBinary, Keyword: "NOT IN"}
+	opBETWEEN    = Op{Type: OpTernary, Keyword: "BETWEEN"}
+	opNOTBETWEEN = Op{Type: OpTernary, Keyword: "NOT BETWEEN"}
 )

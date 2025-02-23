@@ -893,3 +893,124 @@ func TestSelector_SubQuery(t *testing.T) {
 		})
 	}
 }
+
+func TestSelector_Build_NewOperators(t *testing.T) {
+	// 使用 sqlmock
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	db, err := Open(mockDB, "mysql")
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name      string
+		q         *Selector[TestModel2]
+		wantQuery *Query
+		wantErr   error
+	}{
+		{
+			name: "greater than or equal",
+			q: RegisterSelector[TestModel2](db).Select().
+				Where(Col("Age").Gte(18)),
+			wantQuery: &Query{
+				SQL:  "SELECT * FROM `test_model` WHERE `age` >= ?;",
+				Args: []any{18},
+			},
+		},
+		{
+			name: "less than",
+			q: RegisterSelector[TestModel2](db).Select().
+				Where(Col("Age").Lt(18)),
+			wantQuery: &Query{
+				SQL:  "SELECT * FROM `test_model` WHERE `age` < ?;",
+				Args: []any{18},
+			},
+		},
+		{
+			name: "less than or equal",
+			q: RegisterSelector[TestModel2](db).Select().
+				Where(Col("Age").Lte(18)),
+			wantQuery: &Query{
+				SQL:  "SELECT * FROM `test_model` WHERE `age` <= ?;",
+				Args: []any{18},
+			},
+		},
+		{
+			name: "like",
+			q: RegisterSelector[TestModel2](db).Select().
+				Where(Col("Name").Like("Tom%")),
+			wantQuery: &Query{
+				SQL:  "SELECT * FROM `test_model` WHERE `name` LIKE ?;",
+				Args: []any{"Tom%"},
+			},
+		},
+		{
+			name: "not like",
+			q: RegisterSelector[TestModel2](db).Select().
+				Where(Col("Name").NotLike("Tom%")),
+			wantQuery: &Query{
+				SQL:  "SELECT * FROM `test_model` WHERE `name` NOT LIKE ?;",
+				Args: []any{"Tom%"},
+			},
+		},
+		{
+			name: "in",
+			q: RegisterSelector[TestModel2](db).Select().
+				Where(Col("ID").In(1, 2, 3)),
+			wantQuery: &Query{
+				SQL:  "SELECT * FROM `test_model` WHERE `id` IN (?, ?, ?);",
+				Args: []any{1, 2, 3},
+			},
+		},
+		{
+			name: "not in",
+			q: RegisterSelector[TestModel2](db).Select().
+				Where(Col("ID").NotIn(1, 2, 3)),
+			wantQuery: &Query{
+				SQL:  "SELECT * FROM `test_model` WHERE `id` NOT IN (?, ?, ?);",
+				Args: []any{1, 2, 3},
+			},
+		},
+		{
+			name: "between",
+			q: RegisterSelector[TestModel2](db).Select().
+				Where(Col("Age").Between(18, 35)),
+			wantQuery: &Query{
+				SQL:  "SELECT * FROM `test_model` WHERE `age` BETWEEN ? AND ?;",
+				Args: []any{18, 35},
+			},
+		},
+		{
+			name: "not between",
+			q: RegisterSelector[TestModel2](db).Select().
+				Where(Col("Age").NotBetween(18, 35)),
+			wantQuery: &Query{
+				SQL:  "SELECT * FROM `test_model` WHERE `age` NOT BETWEEN ? AND ?;",
+				Args: []any{18, 35},
+			},
+		},
+		{
+			name: "complex query with multiple operators",
+			q: RegisterSelector[TestModel2](db).Select().
+				Where(Col("Age").Between(18, 35),
+					Col("Name").Like("Tom%"),
+					Col("ID").In(1, 2, 3)),
+			wantQuery: &Query{
+				SQL:  "SELECT * FROM `test_model` WHERE `age` BETWEEN ? AND ? AND `name` LIKE ? AND `id` IN (?, ?, ?);",
+				Args: []any{18, 35, "Tom%", 1, 2, 3},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			query, err := tc.q.Build()
+			assert.Equal(t, tc.wantErr, err)
+			if err != nil {
+				return
+			}
+			assert.Equal(t, tc.wantQuery, query)
+		})
+	}
+}
