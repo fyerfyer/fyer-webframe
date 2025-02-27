@@ -13,9 +13,9 @@ type FileUploder struct {
 	DestPath  string
 }
 
-func validatePath(destPath string) bool {
-	// 检查文件名是否包含 .. 或 . 或以 \ 开头
-	if strings.Contains(destPath, "..") || strings.Contains(destPath, "/.") || strings.HasPrefix(destPath, "\\") {
+func validatePath(path string) bool {
+	// 检查路径是否包含 .. 或 . 或以 \ 开头
+	if strings.Contains(path, "..") || strings.Contains(path, "/.") || strings.HasPrefix(path, "\\") {
 		return false
 	}
 	return true
@@ -25,7 +25,7 @@ func (fu FileUploder) HandleUpload() HandlerFunc {
 	return func(ctx *Context) {
 		if !validatePath(fu.DestPath) {
 			ctx.JSON(http.StatusBadRequest, map[string]string{
-				"error": "invalid file path",
+				"error": "invalid destination path",
 			})
 			return
 		}
@@ -46,6 +46,14 @@ func (fu FileUploder) HandleUpload() HandlerFunc {
 			return
 		}
 		defer src.Close()
+
+		// 检查文件名是否安全
+		if !validatePath(header.Filename) {
+			ctx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "invalid file name",
+			})
+			return
+		}
 
 		// 构建目标文件路径
 		dstPath := filepath.Join(fu.DestPath, header.Filename)
@@ -84,7 +92,7 @@ func (f FileDownloader) HandleDownload() HandlerFunc {
 	return func(ctx *Context) {
 		if !validatePath(f.DestPath) {
 			ctx.JSON(http.StatusBadRequest, map[string]string{
-				"error": "invalid file path",
+				"error": "invalid destination path",
 			})
 			return
 		}
@@ -93,6 +101,14 @@ func (f FileDownloader) HandleDownload() HandlerFunc {
 		if req == "" {
 			ctx.JSON(http.StatusBadRequest, map[string]string{
 				"error": "missing file name",
+			})
+			return
+		}
+
+		// 检查请求的文件名是否安全
+		if !validatePath(req) {
+			ctx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "invalid file name",
 			})
 			return
 		}

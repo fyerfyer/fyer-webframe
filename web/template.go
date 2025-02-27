@@ -2,6 +2,8 @@ package web
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"html/template"
 	"sync"
 )
@@ -45,18 +47,17 @@ func NewGoTemplate(opts ...GoTemplateOption) *GoTemplate {
 		opt(t)
 	}
 
-	// 如果设置了模板匹配模式，则立即加载模板
+	// 初始化时如果有模板，则尝试加载
+	var err error
 	if t.tplPattern != "" {
-		if err := t.LoadFromGlob(t.tplPattern); err != nil {
-			panic("load template error: " + err.Error())
-		}
+		err = t.LoadFromGlob(t.tplPattern)
+	} else if len(t.tplFiles) > 0 {
+		err = t.LoadFromFiles(t.tplFiles...)
 	}
 
-	// 如果设置了模板文件列表，则立即加载模板
-	if len(t.tplFiles) > 0 {
-		if err := t.LoadFromFiles(t.tplFiles...); err != nil {
-			panic("load template error: " + err.Error())
-		}
+	// 如果加载失败，直接panic
+	if err != nil {
+		panic("load template error: " + err.Error())
 	}
 
 	return t
@@ -67,11 +68,11 @@ func (g *GoTemplate) LoadFromGlob(pattern string) error {
 	g.Lock()
 	defer g.Unlock()
 
-	var err error
-	g.tpl, err = template.ParseGlob(pattern)
+	temp, err := template.ParseGlob(pattern)
 	if err != nil {
 		return err
 	}
+	g.tpl = temp
 	g.tplPattern = pattern
 	return nil
 }
@@ -81,11 +82,11 @@ func (g *GoTemplate) LoadFromFiles(files ...string) error {
 	g.Lock()
 	defer g.Unlock()
 
-	var err error
-	g.tpl, err = template.ParseFiles(files...)
+	temp, err := template.ParseFiles(files...)
 	if err != nil {
 		return err
 	}
+	g.tpl = temp
 	g.tplFiles = files
 	return nil
 }
@@ -105,6 +106,20 @@ func (g *GoTemplate) Reload() error {
 func (g *GoTemplate) Render(ctx *Context, tplName string, data any) ([]byte, error) {
 	g.RLock()
 	defer g.RUnlock()
+
+	if g.tpl == nil {
+		return nil, errors.New("template not initialized")
+	}
+
+	// 检查模板是否存在
+	if g.tpl.Lookup(tplName) == nil {
+		return nil, fmt.Errorf("template %s not found", tplName)
+	}
+
+	// 验证数据
+	if data == nil {
+		return nil, errors.New("template data cannot be nil")
+	}
 
 	buf := &bytes.Buffer{}
 	err := g.tpl.ExecuteTemplate(buf, tplName, data)
