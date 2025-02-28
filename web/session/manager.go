@@ -74,6 +74,16 @@ func (m *Manager) RefreshSession(ctx *web.Context) error {
 	return m.Refresh(ctx.Context, sess.ID())
 }
 
+// TouchSession renews the session expiration without changing its data
+func (m *Manager) TouchSession(ctx *web.Context) error {
+	sess, err := m.GetSession(ctx)
+	if err != nil {
+		return err
+	}
+
+	return sess.Touch(ctx.Context)
+}
+
 func (m *Manager) DeleteSession(ctx *web.Context) error {
 	id, err := m.Extract(ctx.Req)
 	if err != nil {
@@ -85,4 +95,9 @@ func (m *Manager) DeleteSession(ctx *web.Context) error {
 	}
 
 	return m.Remove(ctx.Resp)
+}
+
+// Close cleans up resources used by the session manager
+func (m *Manager) Close() error {
+	return m.Storage.Close()
 }
