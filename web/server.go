@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"log"
 	"net"
 	"net/http"
 	"time"
@@ -131,19 +130,32 @@ func (s *HTTPServer) handleResponse(ctx *Context) {
 		return
 	}
 
-	// 设置状态码（如果有）
-	if ctx.RespStatusCode > 0 {
-		ctx.Resp.WriteHeader(ctx.RespStatusCode)
+	// 设置默认的状态码，如果没有设置
+	if ctx.RespStatusCode <= 0 {
+		ctx.RespStatusCode = http.StatusOK
 	}
+
+	// 设置状态码
+	ctx.Resp.WriteHeader(ctx.RespStatusCode)
 
 	// 写入响应数据（如果有）
 	if len(ctx.RespData) > 0 {
 		_, err := ctx.Resp.Write(ctx.RespData)
 		if err != nil {
-			log.Printf("write response error: %v\n", err)
+			//s.logError("write response error", err)
+
+			// 尝试写入一个错误响应（如果我们还没有开始写入）
+			if ctx.RespStatusCode < 400 {
+				http.Error(ctx.Resp, "Internal Server Error", http.StatusInternalServerError)
+			}
 		}
 	}
 }
+
+// logError 记录错误
+//func (s *HTTPServer) logError(msg string, err error) {
+//	log.Printf("%s: %v\n", msg, err)
+//}
 
 // Start 启动服务器
 func (s *HTTPServer) Start(addr string) error {

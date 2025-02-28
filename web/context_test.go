@@ -101,3 +101,100 @@ func TestBindJSONError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, "missing request body", err.Error())
 }
+
+func TestContextResponseMethods(t *testing.T) {
+	testCases := []struct {
+		name           string
+		method         func(ctx *Context) error
+		expectedStatus int
+		expectedHeader string
+		expectedBody   string
+	}{
+		{
+			name: "RespJSON",
+			method: func(ctx *Context) error {
+				return ctx.RespJSON(http.StatusCreated, map[string]string{"foo": "bar"})
+			},
+			expectedStatus: http.StatusCreated,
+			expectedHeader: "application/json; charset=utf-8",
+			expectedBody:   `{"foo":"bar"}`,
+		},
+		{
+			name: "RespString",
+			method: func(ctx *Context) error {
+				return ctx.RespString(http.StatusAccepted, "hello world")
+			},
+			expectedStatus: http.StatusAccepted,
+			expectedHeader: "text/plain; charset=utf-8",
+			expectedBody:   "hello world",
+		},
+		{
+			name: "RespBytes",
+			method: func(ctx *Context) error {
+				return ctx.RespBytes(http.StatusOK, []byte("binary data"))
+			},
+			expectedStatus: http.StatusOK,
+			expectedHeader: "application/octet-stream",
+			expectedBody:   "binary data",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			ctx := &Context{
+				Resp: w,
+				Req:  httptest.NewRequest(http.MethodGet, "/", nil),
+			}
+
+			err := tc.method(ctx)
+			require.NoError(t, err)
+
+			// Process the response as the server would
+			s := &HTTPServer{}
+			s.handleResponse(ctx)
+
+			resp := w.Result()
+			defer resp.Body.Close()
+
+			assert.Equal(t, tc.expectedStatus, resp.StatusCode)
+			assert.Equal(t, tc.expectedHeader, resp.Header.Get("Content-Type"))
+
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedBody, string(body))
+		})
+	}
+}
+
+func TestContextRedirect(t *testing.T) {
+	w := httptest.NewRecorder()
+	ctx := &Context{
+		Resp: w,
+		Req:  httptest.NewRequest(http.MethodGet, "/", nil),
+	}
+
+	err := ctx.Redirect(http.StatusFound, "/redirect-target")
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusFound, ctx.RespStatusCode)
+	assert.Equal(t, "/redirect-target", w.Header().Get("Location"))
+	assert.False(t, ctx.unhandled)
+}
+
+func TestContextChaining(t *testing.T) {
+	w := httptest.NewRecorder()
+	ctx := &Context{
+		Resp: w,
+		Req:  httptest.NewRequest(http.MethodGet, "/", nil),
+	}
+
+	// Test method chaining
+	ctx.Status(http.StatusCreated).
+		SetHeader("X-Custom", "value").
+		SetHeader("X-Another", "another-value")
+
+	assert.Equal(t, http.StatusCreated, ctx.RespStatusCode)
+	assert.Equal(t, "value", w.Header().Get("X-Custom"))
+	assert.Equal(t, "another-value", w.Header().Get("X-Another"))
+}

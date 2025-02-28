@@ -78,6 +78,9 @@ func (c *Context) RespJSON(code int, val any) error {
 		return err
 	}
 
+	// 设置content-type头
+	c.Resp.Header().Set("Content-Type", "application/json; charset=utf-8")
+
 	c.RespStatusCode = code
 	c.RespData = data
 	c.unhandled = true
@@ -86,6 +89,9 @@ func (c *Context) RespJSON(code int, val any) error {
 
 // RespString 返回字符串响应
 func (c *Context) RespString(code int, str string) error {
+	// 设置content-type头
+	c.Resp.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
 	c.RespStatusCode = code
 	c.RespData = []byte(str)
 	c.unhandled = true
@@ -94,6 +100,9 @@ func (c *Context) RespString(code int, str string) error {
 
 // RespBytes 返回字节数组响应
 func (c *Context) RespBytes(code int, data []byte) error {
+	// 设置content-type头
+	c.Resp.Header().Set("Content-Type", "application/octet-stream")
+
 	c.RespStatusCode = code
 	c.RespData = data
 	c.unhandled = true
@@ -106,12 +115,35 @@ func (c *Context) Render(tplName string, data any) error {
 		return errors.New("template engine not found")
 	}
 
-	data, err := c.tplEngine.Render(c, tplName, data)
+	result, err := c.tplEngine.Render(c, tplName, data)
 	if err != nil {
 		return err
 	}
 
-	c.RespData = data.([]byte)
+	// 设置content-type头
+	c.Resp.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	c.RespData = result
 	c.unhandled = true
 	return nil
+}
+
+// Redirect 执行重定向操作
+func (c *Context) Redirect(code int, url string) error {
+	c.Resp.Header().Set("Location", url)
+	c.RespStatusCode = code
+	c.unhandled = false // 已经设置好响应数据了
+	return nil
+}
+
+// SetHeader 设置请求头
+func (c *Context) SetHeader(key, value string) *Context {
+	c.Resp.Header().Set(key, value)
+	return c
+}
+
+// Status 设置HTTP状态码
+func (c *Context) Status(code int) *Context {
+	c.RespStatusCode = code
+	return c
 }
