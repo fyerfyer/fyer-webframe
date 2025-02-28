@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
@@ -269,4 +270,84 @@ func TestComplexMiddlewareOrdering(t *testing.T) {
 		"profile-after",
 	}
 	assert.Equal(t, expectedOrder, order)
+}
+
+func TestMiddlewareShortCircuit(t *testing.T) {
+	s := NewHTTPServer()
+	var order []string
+
+	// 注册路由处理函数
+	s.Get("/test/path", func(ctx *Context) {
+		order = append(order, "handler")
+	})
+
+	// 注册一个会短路的中间件
+	s.Use("GET", "/test/*", func(next HandlerFunc) HandlerFunc {
+		return func(ctx *Context) {
+			order = append(order, "middleware1 before")
+			ctx.Abort() // 短路后续中间件
+			ctx.RespJSON(http.StatusUnauthorized, map[string]string{
+				"error": "unauthorized",
+			})
+			order = append(order, "middleware1 after")
+		}
+	})
+
+	// 注册一个不应该被执行的中间件
+	s.Use("GET", "/test/*", func(next HandlerFunc) HandlerFunc {
+		return func(ctx *Context) {
+			order = append(order, "middleware2 before")
+			next(ctx)
+			order = append(order, "middleware2 after")
+		}
+	})
+
+	// 发送请求
+	req := httptest.NewRequest(http.MethodGet, "/test/path", nil)
+	recorder := httptest.NewRecorder()
+	s.ServeHTTP(recorder, req)
+
+	// 验证执行顺序和结果
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	assert.Equal(t, []string{
+		"middleware1 before",
+		"middleware1 after",
+	}, order, "Second middleware and handler should not be executed")
+
+	// 验证响应内容
+	var resp map[string]string
+	err := json.NewDecoder(recorder.Body).Decode(&resp)
+	assert.NoError(t, err)
+	assert.Equal(t, "unauthorized", resp["error"])
+}
+
+func TestMiddlewareNext(t *testing.T) {
+	s := NewHTTPServer()
+	var order []string
+
+	// 注册路由处理函数
+	s.Get("/test/path", func(ctx *Context) {
+		order = append(order, "handler")
+	})
+
+	// 注册一个使用 Next 的中间件
+	s.Use("GET", "/test/*", func(next HandlerFunc) HandlerFunc {
+		return func(ctx *Context) {
+			order = append(order, "middleware1 before")
+			ctx.Next(next)
+			order = append(order, "middleware1 after")
+		}
+	})
+
+	// 发送请求
+	req := httptest.NewRequest(http.MethodGet, "/test/path", nil)
+	recorder := httptest.NewRecorder()
+	s.ServeHTTP(recorder, req)
+
+	// 验证执行顺序
+	assert.Equal(t, []string{
+		"middleware1 before",
+		"handler",
+		"middleware1 after",
+	}, order)
 }

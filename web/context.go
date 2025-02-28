@@ -18,6 +18,21 @@ type Context struct {
 	tplEngine      Template
 	UserValues     map[string]any
 	Context        context.Context
+	aborted        bool
+}
+
+func (c *Context) Abort() {
+	c.aborted = true
+}
+
+func (c *Context) IsAborted() bool {
+	return c.aborted
+}
+
+func (c *Context) Next(next HandlerFunc) {
+	if !c.aborted {
+		next(c)
+	}
 }
 
 func (c *Context) BindJSON(v any) error {

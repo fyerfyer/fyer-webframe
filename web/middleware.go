@@ -65,7 +65,6 @@ func sortBySpecificity(middlewares []MiddlewareWithPath) []Middleware {
 }
 
 // BuildChain 构建中间件执行链，按照静态->正则->参数->通配符的顺序
-// 同时在每种类型内部，按照路径特异性排序（更具体的路径优先执行）
 func BuildChain(n *node, handler HandlerFunc) HandlerFunc {
 	// 对每种类型的中间件按照路径特异性排序
 	sortedStatic := sortBySpecificity(n.staticMiddlewares)
@@ -73,25 +72,49 @@ func BuildChain(n *node, handler HandlerFunc) HandlerFunc {
 	sortedParam := sortBySpecificity(n.paramMiddlewares)
 	sortedWildcard := sortBySpecificity(n.wildcardMiddlewares)
 
-	// 通配符中间件（最后执行）
-	for i := len(sortedWildcard) - 1; i >= 0; i-- {
-		handler = sortedWildcard[i](handler)
-	}
+	return func(ctx *Context) {
+		// 重置 aborted 状态
+		ctx.aborted = false
 
-	// 参数路由中间件
-	for i := len(sortedParam) - 1; i >= 0; i-- {
-		handler = sortedParam[i](handler)
-	}
+		// 通配符中间件（最后执行）
+		for i := len(sortedWildcard) - 1; i >= 0; i-- {
+			if ctx.IsAborted() {
+				return
+			}
+			mw := sortedWildcard[i]
+			handler = mw(handler)
+		}
 
-	// 正则路由中间件
-	for i := len(sortedRegex) - 1; i >= 0; i-- {
-		handler = sortedRegex[i](handler)
-	}
+		// 参数路由中间件
+		for i := len(sortedParam) - 1; i >= 0; i-- {
+			if ctx.IsAborted() {
+				return
+			}
+			mw := sortedParam[i]
+			handler = mw(handler)
+		}
 
-	// 静态路由中间件（最先执行）
-	for i := len(sortedStatic) - 1; i >= 0; i-- {
-		handler = sortedStatic[i](handler)
-	}
+		// 正则路由中间件
+		for i := len(sortedRegex) - 1; i >= 0; i-- {
+			if ctx.IsAborted() {
+				return
+			}
+			mw := sortedRegex[i]
+			handler = mw(handler)
+		}
 
-	return handler
+		// 静态路由中间件（最先执行）
+		for i := len(sortedStatic) - 1; i >= 0; i-- {
+			if ctx.IsAborted() {
+				return
+			}
+			mw := sortedStatic[i]
+			handler = mw(handler)
+		}
+
+		// 如果没有被中止，执行最终的处理函数
+		if !ctx.IsAborted() {
+			handler(ctx)
+		}
+	}
 }
