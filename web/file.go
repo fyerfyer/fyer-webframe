@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -8,9 +9,13 @@ import (
 	"strings"
 )
 
+var defaultMaxSize = int64(32 << 20)
+
 type FileUploder struct {
-	FileField string
-	DestPath  string
+	FileField    string
+	DestPath     string
+	maxSize      int64
+	allowedTypes map[string]bool
 }
 
 func validatePath(path string) bool {
@@ -19,6 +24,37 @@ func validatePath(path string) bool {
 		return false
 	}
 	return true
+}
+
+type FileOption func(*FileUploder)
+
+func WithFileMaxSize(size int64) FileOption {
+	return func(fu *FileUploder) {
+		fu.maxSize = size
+	}
+}
+
+func WithAllowedTypes(types []string) FileOption {
+	return func(fu *FileUploder) {
+		for _, typ := range types {
+			fu.allowedTypes[typ] = true
+		}
+	}
+}
+
+func NewFileUploader(fileField string, destPath string, opts ...FileOption) *FileUploder {
+	uploader := &FileUploder{
+		FileField:    fileField,
+		DestPath:     destPath,
+		maxSize:      defaultMaxSize,
+		allowedTypes: make(map[string]bool, 10),
+	}
+
+	for _, opt := range opts {
+		opt(uploader)
+	}
+
+	return uploader
 }
 
 func (fu FileUploder) HandleUpload() HandlerFunc {
@@ -47,12 +83,50 @@ func (fu FileUploder) HandleUpload() HandlerFunc {
 		}
 		defer src.Close()
 
+		if header.Size > fu.maxSize {
+			ctx.JSON(http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("file size exceeds the limit of %d bytes", fu.maxSize),
+			})
+			return
+		}
+
 		// 检查文件名是否安全
 		if !validatePath(header.Filename) {
 			ctx.JSON(http.StatusBadRequest, map[string]string{
 				"error": "invalid file name",
 			})
 			return
+		}
+
+		// 检查文件类型是否允许
+		if len(fu.allowedTypes) > 0 {
+			contentType := header.Header.Get("Content-Type")
+			if contentType == "" {
+				// Try to detect content type from file content
+				buffer := make([]byte, 512)
+				_, err = src.Read(buffer)
+				if err != nil && err != io.EOF {
+					ctx.JSON(http.StatusInternalServerError, map[string]string{
+						"error": "failed to detect file type",
+					})
+					return
+				}
+				// Reset the file pointer
+				if _, err = src.Seek(0, 0); err != nil {
+					ctx.JSON(http.StatusInternalServerError, map[string]string{
+						"error": "failed to process file",
+					})
+					return
+				}
+				contentType = http.DetectContentType(buffer)
+			}
+
+			if _, ok := fu.allowedTypes[contentType]; !ok {
+				ctx.JSON(http.StatusBadRequest, map[string]string{
+					"error": fmt.Sprintf("file type %s is not allowed", contentType),
+				})
+				return
+			}
 		}
 
 		// 构建目标文件路径
