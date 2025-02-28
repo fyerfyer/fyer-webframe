@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-type HandlerFunc func(ctx *Context)
-
 // Server 接口定义
 type Server interface {
 	http.Handler

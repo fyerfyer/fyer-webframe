@@ -201,3 +201,72 @@ func TestMiddleware(t *testing.T) {
 		assert.Empty(t, order)
 	})
 }
+
+func TestComplexMiddlewareOrdering(t *testing.T) {
+	s := NewHTTPServer()
+	var order []string
+
+	s.Get("/api/users/:id/profile", func(ctx *Context) {
+		order = append(order, "handler")
+		ctx.RespString(http.StatusOK, "OK")
+	})
+
+	s.Use("GET", "/*", func(next HandlerFunc) HandlerFunc {
+		return func(ctx *Context) {
+			order = append(order, "global-before")
+			next(ctx)
+			order = append(order, "global-after")
+		}
+	})
+
+	s.Use("GET", "/api/*", func(next HandlerFunc) HandlerFunc {
+		return func(ctx *Context) {
+			order = append(order, "api-before")
+			next(ctx)
+			order = append(order, "api-after")
+		}
+	})
+
+	s.Use("GET", "/api/users/*", func(next HandlerFunc) HandlerFunc {
+		return func(ctx *Context) {
+			order = append(order, "users-before")
+			next(ctx)
+			order = append(order, "users-after")
+		}
+	})
+
+	s.Use("GET", "/api/users/:id", func(next HandlerFunc) HandlerFunc {
+		return func(ctx *Context) {
+			order = append(order, "user-id-before")
+			next(ctx)
+			order = append(order, "user-id-after")
+		}
+	})
+
+	s.Use("GET", "/api/users/:id/profile", func(next HandlerFunc) HandlerFunc {
+		return func(ctx *Context) {
+			order = append(order, "profile-before")
+			next(ctx)
+			order = append(order, "profile-after")
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/users/123/profile", nil)
+	recorder := httptest.NewRecorder()
+	s.ServeHTTP(recorder, req)
+
+	expectedOrder := []string{
+		"profile-before",
+		"user-id-before",
+		"users-before",
+		"api-before",
+		"global-before",
+		"handler",
+		"global-after",
+		"api-after",
+		"users-after",
+		"user-id-after",
+		"profile-after",
+	}
+	assert.Equal(t, expectedOrder, order)
+}
