@@ -7,6 +7,8 @@ import (
 
 type Router struct {
 	routerTrees map[string]*node
+	middlewares map[string][]MiddlewareWithPath // 使用http方法作为键值对
+	orderCounter int                            // 用于记录中间件注册顺序
 }
 
 type node struct {
@@ -30,53 +32,52 @@ type node struct {
 func NewRouter() *Router {
 	return &Router{
 		routerTrees: make(map[string]*node),
+		middlewares: make(map[string][]MiddlewareWithPath, 10),
+		orderCounter: 0,
 	}
 }
 
+// Use 为指定的HTTP方法和路径注册中间件
 func (r *Router) Use(method string, path string, m Middleware) {
-	// 首先检查路由树是否存在
-	_, ok := r.routerTrees[method]
-	if !ok {
-		panic("method not found")
+	// 如果没有指定方法，则默认注册所有方法
+	if method == "" {
+		methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"}
+		for _, method := range methods {
+			r.Use(method, path, m)
+		}
+		return
 	}
 
-	if path == "" {
-		panic("path cannot be empty")
+	// 如果没有对应的中间件列表，则创建一个
+	if _, ok := r.middlewares[method]; !ok {
+		r.middlewares[method] = make([]MiddlewareWithPath, 0)
 	}
 
-	// 查找所有可能匹配的节点
-	matchedNodes := r.findMatchedNodes(method, path)
-	if len(matchedNodes) == 0 {
-		panic("no routes match this middleware path")
+	// 根据路径类型分类
+	mwType := classifyMiddlewareType(path)
+
+	r.orderCounter++
+
+	// 根据路径类型确定中间件的来源
+	var source MiddlewareSource
+	if path == "/*" {
+		source = GlobalSource
+	} else {
+		source = PathSource
 	}
 
-	// 创建包含路径信息的中间件
 	mwWithPath := MiddlewareWithPath{
 		Middleware: m,
 		Path:       path,
+		Type:       mwType,
+		Order:      r.orderCounter,
+		Source:     source,
 	}
 
-	// 根据路由类型和路径将中间件添加到对应的中间件组
-	for _, n := range matchedNodes {
-		// 处理通配符路径
-		if path == "/*" || strings.Contains(path, "/*") {
-			n.wildcardMiddlewares = append(n.wildcardMiddlewares, mwWithPath)
-		} else if strings.Contains(path, ":") {
-			// 处理参数路径和正则路由
-			if strings.Contains(path, "(") && strings.HasSuffix(path[strings.Index(path, "("):], ")") {
-				// 正则路由
-				n.regexMiddlewares = append(n.regexMiddlewares, mwWithPath)
-			} else {
-				// 普通参数路由
-				n.paramMiddlewares = append(n.paramMiddlewares, mwWithPath)
-			}
-		} else {
-			// 处理静态路径
-			n.staticMiddlewares = append(n.staticMiddlewares, mwWithPath)
-		}
-	}
+	r.middlewares[method] = append(r.middlewares[method], mwWithPath)
 }
 
+// findMatchedNodes 查找匹配的节点
 func (r *Router) findMatchedNodes(method string, path string) []*node {
 	var matched []*node
 	root := r.routerTrees[method]
@@ -187,6 +188,7 @@ func (r *Router) findMatchedNodes(method string, path string) []*node {
 	return matched
 }
 
+// getChildren 获取所有子节点
 func (r *Router) getChildren(n *node) []*node {
 	var children []*node
 	if n.children == nil {
@@ -203,30 +205,37 @@ func (r *Router) getChildren(n *node) []*node {
 	return children
 }
 
+// Get 注册GET方法路由
 func (r *Router) Get(path string, handlerFunc HandlerFunc) {
 	r.addHandler("GET", path, handlerFunc)
 }
 
+// Post 注册POST方法路由
 func (r *Router) Post(path string, handlerFunc HandlerFunc) {
 	r.addHandler("POST", path, handlerFunc)
 }
 
+// Put 注册PUT方法路由
 func (r *Router) Put(path string, handlerFunc HandlerFunc) {
 	r.addHandler("PUT", path, handlerFunc)
 }
 
+// Delete 注册DELETE方法路由
 func (r *Router) Delete(path string, handlerFunc HandlerFunc) {
 	r.addHandler("DELETE", path, handlerFunc)
 }
 
+// Patch 注册PATCH方法路由
 func (r *Router) Patch(path string, handlerFunc HandlerFunc) {
 	r.addHandler("PATCH", path, handlerFunc)
 }
 
+// Options 注册OPTIONS方法路由
 func (r *Router) Options(path string, handlerFunc HandlerFunc) {
 	r.addHandler("OPTIONS", path, handlerFunc)
 }
 
+// addHandler 注册路由处理函数
 func (r *Router) addHandler(method string, path string, handlerFunc HandlerFunc) {
 	// 首先查看是否有对应根节点，没有的话就创建一个
 	if _, ok := r.routerTrees[method]; !ok {
@@ -330,6 +339,7 @@ func (r *Router) addHandler(method string, path string, handlerFunc HandlerFunc)
 	return
 }
 
+// findHandler 查找路由处理函数
 func (r *Router) findHandler(method string, path string, ctx *Context) (*node, bool) {
 	if ctx.Param == nil {
 		ctx.Param = make(map[string]string)
@@ -421,6 +431,7 @@ func (r *Router) findHandler(method string, path string, ctx *Context) (*node, b
 	return wildcard, false
 }
 
+// createChild 创建子节点
 func (n *node) createChild(path string, isRegex bool, pattern *regexp.Regexp) {
 	if n.children == nil {
 		n.children = make(map[string]*node)
@@ -447,6 +458,7 @@ func (n *node) createChild(path string, isRegex bool, pattern *regexp.Regexp) {
 	}
 }
 
+// findChild 查找子节点
 func (n *node) findChild(path string) (*node, *node, []*node, bool, bool, bool) {
 	if n.children == nil {
 		return nil, nil, nil, false, false, false
@@ -475,6 +487,7 @@ func (n *node) findChild(path string) (*node, *node, []*node, bool, bool, bool) 
 	return staticNode, wildcardNode, paramNodes, staticOK, wildcardOK, paramOK
 }
 
+// getParamChild 获取参数节点
 func (n *node) getParamChild() ([]*node, bool, bool) {
 	if n.children == nil {
 		return nil, false, false

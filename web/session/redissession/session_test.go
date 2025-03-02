@@ -104,36 +104,36 @@ func (s *RedisSessionTestSuite) TestSessionFind() {
 }
 
 func (s *RedisSessionTestSuite) TestSessionExpiration() {
-    ctx := context.Background()
-    id := uuid.New().String()
+	ctx := context.Background()
+	id := uuid.New().String()
 
-    // Create session with shorter expiration
-    shortStorage := NewRedisStorage(
-        s.client,
-        WithExpireTime(1*time.Second),
-        WithPrefix("test_sess_"),
-    )
-    defer shortStorage.Close()
+	// Create session with shorter expiration
+	shortStorage := NewRedisStorage(
+		s.client,
+		WithExpireTime(1*time.Second),
+		WithPrefix("test_sess_"),
+	)
+	defer shortStorage.Close()
 
-    sess, err := shortStorage.Create(ctx, id)
-    require.NoError(s.T(), err)
-    require.NoError(s.T(), sess.Set(ctx, "test_key", "test_value"))
+	sess, err := shortStorage.Create(ctx, id)
+	require.NoError(s.T(), err)
+	require.NoError(s.T(), sess.Set(ctx, "test_key", "test_value"))
 
-    // Verify key exists in Redis
-    exists, err := s.client.Exists(ctx, "test_sess_"+id).Result()
-    require.NoError(s.T(), err)
-    assert.Equal(s.T(), int64(1), exists)
+	// Verify key exists in Redis
+	exists, err := s.client.Exists(ctx, "test_sess_"+id).Result()
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), int64(1), exists)
 
-    // Wait for expiration - give a bit more time to ensure Redis clears it
-    time.Sleep(3 * time.Second)
+	// Wait for expiration - give a bit more time to ensure Redis clears it
+	time.Sleep(3 * time.Second)
 
-    // Verify key doesn't exist in Redis anymore
-    exists, err = s.client.Exists(ctx, "test_sess_"+id).Result()
-    require.NoError(s.T(), err)
-    assert.Equal(s.T(), int64(0), exists, "Session key should have been removed from Redis")
+	// Verify key doesn't exist in Redis anymore
+	exists, err = s.client.Exists(ctx, "test_sess_"+id).Result()
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), int64(0), exists, "Session key should have been removed from Redis")
 
-    // Now try to find the session - should fail with redis.Nil
-    _, err = shortStorage.Find(ctx, id)
+	// Now try to find the session - should fail with redis.Nil
+	_, err = shortStorage.Find(ctx, id)
 	assert.Equal(s.T(), redis.Nil, err, "Session should have expired")
 }
 
