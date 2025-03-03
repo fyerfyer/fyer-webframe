@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/fyerfyer/fyer-kit/pool"
 )
 
 // Server 接口定义
@@ -39,12 +41,13 @@ type RouteRegister interface {
 
 // HTTPServer 结构体
 type HTTPServer struct {
-	*Router   // 继承Router
-	start     bool
-	noRouter  HandlerFunc  // 404处理器
-	server    *http.Server // 底层的http server
-	baseRoute string       // 基础路由前缀
-	tplEngine Template     // 模板引擎
+	*Router     // 继承Router
+	start       bool
+	noRouter    HandlerFunc      // 404处理器
+	server      *http.Server     // 底层的http server
+	baseRoute   string           // 基础路由前缀
+	tplEngine   Template         // 模板引擎
+	poolManager pool.PoolManager // 连接池管理器
 }
 
 // ServerOption 定义服务器选项
@@ -85,6 +88,13 @@ func WithBasePath(basePath string) ServerOption {
 	}
 }
 
+// WithPoolManager 设置连接池管理器
+func WithPoolManager(manager pool.PoolManager) ServerOption {
+	return func(server *HTTPServer) {
+		server.poolManager = manager
+	}
+}
+
 // NewHTTPServer 创建HTTP服务器实例
 func NewHTTPServer(opts ...ServerOption) *HTTPServer {
 	server := &HTTPServer{
@@ -109,13 +119,14 @@ func NewHTTPServer(opts ...ServerOption) *HTTPServer {
 // ServeHTTP HTTPServer的核心处理函数
 func (s *HTTPServer) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	ctx := &Context{
-		Req:        req,
-		Resp:       res,
-		Param:      make(map[string]string),
-		tplEngine:  s.tplEngine,
-		Context:    req.Context(),
-		unhandled:  true,
-		UserValues: make(map[string]any),
+		Req:         req,
+		Resp:        res,
+		Param:       make(map[string]string),
+		tplEngine:   s.tplEngine,
+		Context:     req.Context(),
+		unhandled:   true,
+		UserValues:  make(map[string]any),
+		poolManager: s.poolManager, // 注入连接池管理器
 	}
 
 	// 如果设置了基础路径，需要处理路径前缀
@@ -196,6 +207,14 @@ func (s *HTTPServer) Start(addr string) error {
 // Shutdown 优雅关闭
 func (s *HTTPServer) Shutdown(ctx context.Context) error {
 	s.start = false
+
+	// 关闭连接池管理器
+	if s.poolManager != nil {
+		if err := s.poolManager.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+
 	return s.server.Shutdown(ctx)
 }
 
@@ -249,6 +268,16 @@ func (s *HTTPServer) Middleware() MiddlewareManager {
 func (s *HTTPServer) UseTemplate(tpl Template) Server {
 	s.tplEngine = tpl
 	return s
+}
+
+// PoolManager 返回连接池管理器
+func (s *HTTPServer) PoolManager() pool.PoolManager {
+	return s.poolManager
+}
+
+// SetPoolManager 设置连接池管理器
+func (s *HTTPServer) SetPoolManager(manager pool.PoolManager) {
+	s.poolManager = manager
 }
 
 // routeRegister 实现RouteRegister接口

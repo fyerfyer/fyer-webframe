@@ -4,6 +4,7 @@ go 1.23.5
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/fyerfyer/fyer-kit v0.0.1
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/google/uuid v1.6.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible

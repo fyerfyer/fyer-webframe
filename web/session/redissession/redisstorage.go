@@ -2,16 +2,17 @@ package redissession
 
 import (
 	"context"
+	"github.com/fyerfyer/fyer-webframe/web/session"
 	"log"
 	"sync"
 	"time"
 
-	"github.com/fyerfyer/fyer-webframe/web/session"
+	"github.com/fyerfyer/fyer-kit/pool"
 	"github.com/go-redis/redis/v8"
 )
 
 type RedisStorage struct {
-	client          redis.Cmdable
+	redisPool       pool.Pool          // 使用连接池代替直接的Redis客户端
 	expireTime      time.Duration
 	prefix          string
 	sessions        sync.Map // 添加session缓存池
@@ -43,11 +44,12 @@ func WithCleanupInterval(interval time.Duration) RedisStorageOption {
 	}
 }
 
-func NewRedisStorage(redis redis.Cmdable, opts ...RedisStorageOption) *RedisStorage {
+// NewRedisStorage 创建一个新的Redis会话存储，使用连接池
+func NewRedisStorage(redisPool pool.Pool, opts ...RedisStorageOption) *RedisStorage {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	rs := &RedisStorage{
-		client:          redis,
+		redisPool:       redisPool,
 		expireTime:      defaultExpireTime,
 		prefix:          defaultPrefix,
 		cleanupInterval: defaultCleanupInterval,
@@ -75,7 +77,7 @@ func (r *RedisStorage) startCleanup(ctx context.Context) {
 		case <-ticker.C:
 			if err := r.GC(ctx); err != nil {
 				// 记录错误日志
-				log.Fatalf("error cleaning up expired sessions: %v", err)
+				log.Printf("error cleaning up expired sessions: %v", err)
 			}
 		}
 	}
@@ -83,20 +85,33 @@ func (r *RedisStorage) startCleanup(ctx context.Context) {
 
 // GC 从session缓存池中清除过期的session
 func (r *RedisStorage) GC(ctx context.Context) error {
+	// 从连接池获取一个连接
+	conn, err := r.redisPool.Get(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	// 获取底层Redis客户端
+	client, ok := conn.Raw().(*redis.Client)
+	if !ok {
+		return r.redisPool.Put(conn, err)
+	}
+
 	// Clean local cache based on Redis data
 	r.sessions.Range(func(key, value interface{}) bool {
 		id := key.(string)
-		exists, err := r.client.Exists(ctx, r.prefix+id).Result()
+		exists, err := client.Exists(ctx, r.prefix+id).Result()
 		if err != nil || exists == 0 {
 			r.sessions.Delete(id)
 		}
 		return true
 	})
 
-	return nil
+	return r.redisPool.Put(conn, nil)
 }
 
-// Close 关闭清理goroutine
+// Close 关闭清理goroutine和连接池
 func (r *RedisStorage) Close() error {
 	if r.stopCleanup != nil {
 		r.stopCleanup()
@@ -106,23 +121,37 @@ func (r *RedisStorage) Close() error {
 
 // Create 创建并返回session
 func (r *RedisStorage) Create(ctx context.Context, id string) (session.Session, error) {
+	// 从连接池获取一个连接
+	conn, err := r.redisPool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	// 获取底层Redis客户端
+	client, ok := conn.Raw().(*redis.Client)
+	if !ok {
+		return nil, r.redisPool.Put(conn, err)
+	}
+
 	key := r.prefix + id
 
 	// 创建session hash并设置过期时间
-	err := r.client.HSet(ctx, key, "_created", time.Now().Unix()).Err()
+	err = client.HSet(ctx, key, "_created", time.Now().Unix()).Err()
 	if err != nil {
-		return nil, err
+		return nil, r.redisPool.Put(conn, err)
 	}
 
-	err = r.client.Expire(ctx, key, r.expireTime).Err()
+	err = client.Expire(ctx, key, r.expireTime).Err()
 	if err != nil {
-		return nil, err
+		return nil, r.redisPool.Put(conn, err)
 	}
 
+	// 创建新的会话，使用连接池
 	sess := &Session{
 		id:           id,
 		data:         make(map[string]any),
-		sessionRedis: r.client,
+		redisPool:    r.redisPool, // 使用连接池代替直接的Redis客户端
 		prefix:       r.prefix,
 		expiration:   r.expireTime,
 	}
@@ -130,7 +159,7 @@ func (r *RedisStorage) Create(ctx context.Context, id string) (session.Session, 
 	// 将session存入缓存池
 	r.sessions.Store(id, sess)
 
-	return sess, nil
+	return sess, r.redisPool.Put(conn, nil)
 }
 
 // Find 查询并返回session
@@ -138,32 +167,66 @@ func (r *RedisStorage) Find(ctx context.Context, id string) (session.Session, er
 	// 先从缓存池中查找
 	if sessVal, ok := r.sessions.Load(id); ok {
 		sess := sessVal.(*Session)
+
+		// 从连接池获取一个连接来验证会话是否仍然存在
+		conn, err := r.redisPool.Get(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer conn.Close()
+
+		// 获取底层Redis客户端
+		client, ok := conn.Raw().(*redis.Client)
+		if !ok {
+			return nil, r.redisPool.Put(conn, err)
+		}
+
 		// 检查 Redis 中的会话是否仍然存在（可能已过期）
-        exists, err := r.client.Exists(ctx, r.prefix+id).Result()
-        if err != nil {
-            return nil, err
-        }
-        if exists == 0 {
-            // 会话已过期或被删除，从本地缓存中移除
-            r.sessions.Delete(id)
-            return nil, redis.Nil
-        }
-        return sess, nil
+		exists, err := client.Exists(ctx, r.prefix+id).Result()
+		if err != nil {
+			return nil, r.redisPool.Put(conn, err)
+		}
+
+		if exists == 0 {
+			// 会话已过期或被删除，从本地缓存中移除
+			r.sessions.Delete(id)
+			r.redisPool.Put(conn, nil)
+			return nil, redis.Nil
+		}
+
+		r.redisPool.Put(conn, nil)
+		return sess, nil
 	}
 
-	// 检查session是否存在，以保持数据一致性
-	exists, err := r.client.Exists(ctx, r.prefix+id).Result()
+	// 如果缓存中没有，从Redis获取
+	conn, err := r.redisPool.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer conn.Close()
+
+	// 获取底层Redis客户端
+	client, ok := conn.Raw().(*redis.Client)
+	if !ok {
+		return nil, r.redisPool.Put(conn, err)
+	}
+
+	// 检查session是否存在
+	exists, err := client.Exists(ctx, r.prefix+id).Result()
+	if err != nil {
+		return nil, r.redisPool.Put(conn, err)
+	}
+
 	if exists == 0 {
+		r.redisPool.Put(conn, nil)
 		return nil, redis.Nil
 	}
 
+	// 创建新的会话，使用连接池
 	sess := &Session{
 		id:           id,
 		data:         make(map[string]any),
-		sessionRedis: r.client,
+		redisPool:    r.redisPool, // 使用连接池代替直接的Redis客户端
 		prefix:       r.prefix,
 		expiration:   r.expireTime,
 	}
@@ -171,13 +234,25 @@ func (r *RedisStorage) Find(ctx context.Context, id string) (session.Session, er
 	// 将session存入缓存池
 	r.sessions.Store(id, sess)
 
-	return sess, nil
+	return sess, r.redisPool.Put(conn, nil)
 }
 
 // Refresh 刷新session的过期时间
 func (r *RedisStorage) Refresh(ctx context.Context, id string) error {
-	_, err := r.client.Expire(ctx, r.prefix+id, r.expireTime).Result()
-	return err
+	conn, err := r.redisPool.Get(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	// 获取底层Redis客户端
+	client, ok := conn.Raw().(*redis.Client)
+	if !ok {
+		return r.redisPool.Put(conn, err)
+	}
+
+	_, err = client.Expire(ctx, r.prefix+id, r.expireTime).Result()
+	return r.redisPool.Put(conn, err)
 }
 
 // Delete 删除session
@@ -185,6 +260,18 @@ func (r *RedisStorage) Delete(ctx context.Context, id string) error {
 	// 从缓存池中删除
 	r.sessions.Delete(id)
 
-	_, err := r.client.Del(ctx, r.prefix+id).Result()
-	return err
+	conn, err := r.redisPool.Get(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	// 获取底层Redis客户端
+	client, ok := conn.Raw().(*redis.Client)
+	if !ok {
+		return r.redisPool.Put(conn, err)
+	}
+
+	_, err = client.Del(ctx, r.prefix+id).Result()
+	return r.redisPool.Put(conn, err)
 }

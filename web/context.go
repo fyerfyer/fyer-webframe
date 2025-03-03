@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"github.com/fyerfyer/fyer-kit/pool"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -19,14 +20,15 @@ type Context struct {
 	Req            *http.Request       // HTTP请求对象
 	Resp           http.ResponseWriter // HTTP响应写入器
 	Param          map[string]string   // 路由参数映射
-	RouteURL       string             // 当前路由的URL
-	RespStatusCode int                // 响应状态码
-	RespData      []byte             // 响应数据
-	unhandled     bool               // 标记是否已处理请求
-	tplEngine     Template           // 模板引擎
-	UserValues    map[string]any     // 用户自定义值存储
-	Context       context.Context    // 标准上下文对象
-	aborted       bool               // 标记是否终止处理
+	RouteURL       string              // 当前路由的URL
+	RespStatusCode int                 // 响应状态码
+	RespData       []byte              // 响应数据
+	unhandled      bool                // 标记是否已处理请求
+	tplEngine      Template            // 模板引擎
+	UserValues     map[string]any      // 用户自定义值存储
+	Context        context.Context     // 标准上下文对象
+	aborted        bool                // 标记是否终止处理
+	poolManager    pool.PoolManager    // 连接池管理器
 }
 
 // Abort 终止当前请求的处理流程
@@ -458,4 +460,26 @@ func (c *Context) UserAgent() string {
 // Referer 获取Referer头部信息
 func (c *Context) Referer() string {
 	return c.GetHeader("Referer")
+}
+
+// Pool 从连接池管理器中获取指定名称的连接池
+func (c *Context) Pool(name string) (pool.Pool, error) {
+	if c.poolManager == nil {
+		return nil, errors.New("pool manager not initialized")
+	}
+	return c.poolManager.Get(name)
+}
+
+// SetPoolManager 设置连接池管理器
+func (c *Context) SetPoolManager(manager pool.PoolManager) {
+	c.poolManager = manager
+}
+
+// GetConnection 从指定池中获取连接
+func (c *Context) GetConnection(poolName string) (pool.Connection, error) {
+	p, err := c.Pool(poolName)
+	if err != nil {
+		return nil, err
+	}
+	return p.Get(c.Context)
 }

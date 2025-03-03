@@ -3,14 +3,17 @@ package web
 import (
 	"bytes"
 	"context"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/fyerfyer/fyer-kit/pool"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestContext(t *testing.T) {
@@ -311,4 +314,270 @@ func TestCookies(t *testing.T) {
 	assert.Equal(t, 1, len(cookies))
 	assert.Equal(t, "response-cookie", cookies[0].Name)
 	assert.Equal(t, "response-value", cookies[0].Value)
+}
+
+// MockPoolManager 实现 pool.PoolManager 接口用于测试
+// MockPoolManager 实现 pool.PoolManager 接口用于测试
+type MockPoolManager struct {
+	pools         map[string]pool.Pool
+	failGetPool   bool
+	failGetConn   bool
+	connLifecycle []string
+}
+
+func NewMockPoolManager() *MockPoolManager {
+	return &MockPoolManager{
+		pools:         make(map[string]pool.Pool),
+		connLifecycle: make([]string, 0),
+	}
+}
+
+func (m *MockPoolManager) Get(name string) (pool.Pool, error) {
+	if m.failGetPool {
+		return nil, fmt.Errorf("failed to get pool")
+	}
+	p, ok := m.pools[name]
+	if !ok {
+		return nil, fmt.Errorf("pool not found: %s", name)
+	}
+	return p, nil
+}
+
+func (m *MockPoolManager) Register(name string, p pool.Pool) error {
+	m.pools[name] = p
+	return nil
+}
+
+func (m *MockPoolManager) Remove(name string) error {
+	delete(m.pools, name)
+	return nil
+}
+
+func (m *MockPoolManager) Shutdown(ctx context.Context) error {
+	for _, p := range m.pools {
+		if err := p.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *MockPoolManager) Stats() map[string]pool.Stats {
+	stats := make(map[string]pool.Stats)
+	for name, p := range m.pools {
+		stats[name] = p.Stats()
+	}
+	return stats
+}
+
+// MockPool 实现 pool.Pool 接口用于测试
+type MockPool struct {
+	manager       *MockPoolManager
+	connections   []pool.Connection
+	failGetConn   bool
+	failPutConn   bool
+	failShutdown  bool
+	currentConnID int
+}
+
+func NewMockPool(manager *MockPoolManager) *MockPool {
+	return &MockPool{
+		manager:     manager,
+		connections: make([]pool.Connection, 0),
+	}
+}
+
+func (p *MockPool) Get(ctx context.Context) (pool.Connection, error) {
+	if p.failGetConn {
+		return nil, fmt.Errorf("failed to get connection")
+	}
+	p.manager.connLifecycle = append(p.manager.connLifecycle, "get connection")
+	p.currentConnID++
+	conn := &MockConnection{
+		id:      p.currentConnID,
+		pool:    p,
+		closed:  false,
+		manager: p.manager,
+	}
+	p.connections = append(p.connections, conn)
+	return conn, nil
+}
+
+func (p *MockPool) Put(conn pool.Connection, err error) error {
+	if p.failPutConn {
+		return fmt.Errorf("failed to return connection")
+	}
+	p.manager.connLifecycle = append(p.manager.connLifecycle, "return connection")
+	return nil
+}
+
+func (p *MockPool) Shutdown(ctx context.Context) error {
+	if p.failShutdown {
+		return fmt.Errorf("failed to close pool")
+	}
+	p.manager.connLifecycle = append(p.manager.connLifecycle, "shutdown pool")
+	return nil
+}
+
+func (p *MockPool) Stats() pool.Stats {
+	return pool.Stats{
+		Active: len(p.connections),
+	}
+}
+
+// MockConnection 实现 pool.Connection 接口用于测试
+type MockConnection struct {
+	id      int
+	pool    *MockPool
+	closed  bool
+	manager *MockPoolManager
+}
+
+func (c *MockConnection) Close() error {
+	c.closed = true
+	c.manager.connLifecycle = append(c.manager.connLifecycle, "close connection")
+	return nil
+}
+
+func (c *MockConnection) Raw() interface{} {
+	c.manager.connLifecycle = append(c.manager.connLifecycle, "access connection")
+	return c.id
+}
+
+func (c *MockConnection) IsAlive() bool {
+	return !c.closed
+}
+
+func (c *MockConnection) ResetState() error {
+	return nil
+}
+
+func TestContextPoolAccess(t *testing.T) {
+	t.Run("test getting conn", func(t *testing.T) {
+		// 创建mock连接池管理器
+		mockManager := NewMockPoolManager()
+		mockPool := NewMockPool(mockManager)
+
+		// 注册连接池
+		err := mockManager.Register("testdb", mockPool)
+		require.NoError(t, err)
+
+		// 创建context并设置连接池管理器
+		ctx := &Context{
+			Context:     context.Background(),
+			poolManager: mockManager,
+		}
+
+		// 从连接池获取连接
+		conn, err := ctx.GetConnection("testdb")
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+
+		// 检查连接的ID
+		connID := conn.Raw().(int)
+		assert.Equal(t, 1, connID)
+
+		// 关闭连接
+		err = conn.Close()
+		require.NoError(t, err)
+	})
+
+	t.Run("test conn lifecycle", func(t *testing.T) {
+		mockManager := NewMockPoolManager()
+		mockPool := NewMockPool(mockManager)
+
+		// 注册连接池
+		err := mockManager.Register("db", mockPool)
+		require.NoError(t, err)
+
+		ctx := &Context{
+			Context:     context.Background(),
+			poolManager: mockManager,
+		}
+
+		// 1. 获取连接
+		conn, err := ctx.GetConnection("db")
+		require.NoError(t, err)
+
+		// 2. 使用连接
+		id := conn.Raw()
+		assert.NotNil(t, id)
+
+		// 3. 关闭连接
+		err = conn.Close()
+		require.NoError(t, err)
+
+		// 验证生命周期事件
+		expectedLifecycle := []string{"get connection", "access connection", "close connection"}
+		assert.Equal(t, expectedLifecycle, mockManager.connLifecycle)
+
+		// 验证连接状态
+		assert.False(t, conn.IsAlive())
+	})
+
+	t.Run("test pool error handling", func(t *testing.T) {
+		mockManager := NewMockPoolManager()
+		mockPool := NewMockPool(mockManager)
+
+		// 设置获取池失败标志
+		mockManager.failGetPool = true
+
+		ctx := &Context{
+			Context:     context.Background(),
+			poolManager: mockManager,
+		}
+
+		// 测试获取不存在的连接池
+		conn, err := ctx.GetConnection("non-existent-pool")
+		assert.Error(t, err)
+		assert.Nil(t, conn)
+		assert.Contains(t, err.Error(), "failed to get pool")
+
+		// 重置标志并注册池
+		mockManager.failGetPool = false
+		err = mockManager.Register("faildb", mockPool)
+		require.NoError(t, err)
+
+		// 设置获取连接失败标志
+		mockPool.failGetConn = true
+
+		// 测试获取连接失败
+		conn, err = ctx.GetConnection("faildb")
+		assert.Error(t, err)
+		assert.Nil(t, conn)
+		assert.Contains(t, err.Error(), "failed to get connection")
+
+		// 测试连接池管理器为nil的情况
+		ctx.poolManager = nil
+		conn, err = ctx.GetConnection("any-pool")
+		assert.Error(t, err)
+		assert.Nil(t, conn)
+		assert.Contains(t, err.Error(), "pool manager not initialized")
+	})
+
+	t.Run("test pool access helper methods", func(t *testing.T) {
+		mockManager := NewMockPoolManager()
+		mockPool := NewMockPool(mockManager)
+
+		err := mockManager.Register("maindb", mockPool)
+		require.NoError(t, err)
+
+		ctx := &Context{
+			Context: context.Background(),
+		}
+
+		// 测试 SetPoolManager
+		ctx.SetPoolManager(mockManager)
+		assert.Equal(t, mockManager, ctx.poolManager)
+
+		// 测试 Pool 方法
+		pool, err := ctx.Pool("maindb")
+		require.NoError(t, err)
+		assert.Equal(t, mockPool, pool)
+
+		// 测试获取不存在的池
+		pool, err = ctx.Pool("non-existent-pool")
+		assert.Error(t, err)
+		assert.Nil(t, pool)
+	})
 }

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/fyerfyer/fyer-kit/pool"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -320,8 +322,8 @@ func TestServerOptions(t *testing.T) {
 	s := NewHTTPServer(
 		WithNotFoundHandler(customHandler),
 		WithBasePath("/app"),
-		WithReadTimeout(5 * time.Second),
-		WithWriteTimeout(10 * time.Second),
+		WithReadTimeout(5*time.Second),
+		WithWriteTimeout(10*time.Second),
 	)
 
 	// 注册一个应用路径下的路由
@@ -394,7 +396,7 @@ func TestCombinedFeatures(t *testing.T) {
 	users.Get("/:id", func(ctx *Context) {
 		id := ctx.PathParam("id").Value
 		ctx.JSON(http.StatusOK, map[string]string{
-			"id": id,
+			"id":   id,
 			"name": "User " + id,
 		})
 	}).Middleware(func(next HandlerFunc) HandlerFunc {
@@ -641,3 +643,155 @@ func assertJSONResponse(t *testing.T, resp *httptest.ResponseRecorder, expected 
 
 	assert.Equal(t, expectedParsed, actual, "JSON response should match expected value")
 }
+
+func TestServerPoolManagement(t *testing.T) {
+	// 测试连接池的初始化和注册
+	t.Run("pool initialization and registration", func(t *testing.T) {
+		mockManager := NewMockPoolManager()
+
+		// 给server创建PoolManger
+		s := NewHTTPServer(WithPoolManager(mockManager))
+
+		// 创建一些连接池
+		pool1 := NewMockPool(mockManager)
+		pool2 := NewMockPool(mockManager)
+
+		require.NoError(t, mockManager.Register("db1", pool1))
+		require.NoError(t, mockManager.Register("db2", pool2))
+
+		// 验证池可被访问
+		assert.Equal(t, mockManager, s.PoolManager())
+
+		p1, err := s.PoolManager().Get("db1")
+		require.NoError(t, err)
+		assert.Equal(t, pool1, p1)
+
+		p2, err := s.PoolManager().Get("db2")
+		require.NoError(t, err)
+		assert.Equal(t, pool2, p2)
+	})
+
+	// 测试服务器关闭时池的优雅关闭
+	t.Run("graceful shutdown of pools", func(t *testing.T) {
+		mockManager := NewMockPoolManager()
+
+		pool1 := &MockPool{
+			manager:     mockManager,
+			connections: make([]pool.Connection, 0),
+		}
+		pool2 := &MockPool{
+			manager:     mockManager,
+			connections: make([]pool.Connection, 0),
+		}
+
+		require.NoError(t, mockManager.Register("db1", pool1))
+		require.NoError(t, mockManager.Register("db2", pool2))
+
+		s := NewHTTPServer(WithPoolManager(mockManager))
+
+		s.Get("/use-pool", func(ctx *Context) {
+			conn, err := ctx.GetConnection("db1")
+			if err != nil {
+				ctx.String(http.StatusInternalServerError, "Failed to get connection: %v", err)
+				return
+			}
+			defer conn.Close()
+			ctx.String(http.StatusOK, "Used pool connection: %v", conn.Raw())
+		})
+
+		ctx := context.Background()
+		require.NoError(t, s.Shutdown(ctx))
+
+		assert.Contains(t, mockManager.connLifecycle, "shutdown pool")
+	})
+
+	// 测试多个请求并发访问池
+	t.Run("concurrent pool access", func(t *testing.T) {
+		mockManager := NewMockPoolManager()
+
+		sharedPool := &MockPool{
+			manager:     mockManager,
+			connections: make([]pool.Connection, 0),
+		}
+		require.NoError(t, mockManager.Register("db", sharedPool))
+
+		s := NewHTTPServer(WithPoolManager(mockManager))
+		s.Get("/concurrent-pool-access", func(ctx *Context) {
+			conn, err := ctx.GetConnection("db")
+			if err != nil {
+				ctx.String(http.StatusInternalServerError, "Failed to get connection: %v", err)
+				return
+			}
+			defer conn.Close()
+
+			// 模拟连接池执行一些工作
+			time.Sleep(10 * time.Millisecond)
+
+			ctx.String(http.StatusOK, "Used connection: %v", conn.Raw())
+		})
+
+		ts := httptest.NewServer(s)
+		defer ts.Close()
+
+		var wg sync.WaitGroup
+		concurrentRequests := 10
+		results := make([]bool, concurrentRequests)
+
+		for i := 0; i < concurrentRequests; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+
+				resp, err := http.Get(ts.URL + "/concurrent-pool-access")
+				if err != nil {
+					t.Logf("Request %d failed: %v", index, err)
+					results[index] = false
+					return
+				}
+				defer resp.Body.Close()
+
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					t.Logf("Failed to read response body for request %d: %v", index, err)
+					results[index] = false
+					return
+				}
+
+				results[index] = resp.StatusCode == http.StatusOK &&
+					strings.Contains(string(body), "Used connection:")
+			}(i)
+		}
+
+		wg.Wait()
+
+		successCount := 0
+		for _, success := range results {
+			if success {
+				successCount++
+			}
+		}
+
+		assert.Equal(t, concurrentRequests, successCount, "All concurrent requests should succeed")
+
+		assert.GreaterOrEqual(t, sharedPool.currentConnID, 1, "At least one connection should have been created")
+
+		assert.LessOrEqual(t, sharedPool.currentConnID, concurrentRequests,
+			"Number of connections should be less than or equal to number of requests")
+	})
+}
+
+// MockPoolManager 的这些代码已从 context_test.go 中提取，此处是为了参考
+
+// func NewMockPoolManager() *MockPoolManager {
+//     return &MockPoolManager{
+//         pools:         make(map[string]pool.Pool),
+//         connLifecycle: make([]string, 0),
+//     }
+// }
+
+// func NewMockPool(manager *MockPoolManager) *MockPool {
+//     return &MockPool{
+//         manager:     manager,
+//         connections: make([]pool.Connection, 0),
+//     }
+// }

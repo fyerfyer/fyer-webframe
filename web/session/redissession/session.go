@@ -7,15 +7,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fyerfyer/fyer-kit/pool"
 	"github.com/go-redis/redis/v8"
 )
 
 type Session struct {
 	id           string
 	data         map[string]any
-	sessionRedis redis.Cmdable
+	redisPool    pool.Pool       // 使用连接池代替直接的Redis客户端
 	prefix       string
-	mu           sync.RWMutex // 添加读写锁
+	mu           sync.RWMutex    // 添加读写锁
 	expiration   time.Duration
 }
 
@@ -36,17 +37,30 @@ func (s *Session) Get(ctx context.Context, key string) (any, error) {
 	}
 	s.mu.RUnlock()
 
-	// 从Redis获取
-	val, err := s.sessionRedis.HGet(ctx, s.prefix+s.id, key).Result()
+	// 从连接池获取一个连接
+	conn, err := s.redisPool.Get(ctx)
 	if err != nil {
 		return nil, err
+	}
+	defer conn.Close()
+
+	// 获取底层Redis客户端
+	client, ok := conn.Raw().(*redis.Client)
+	if !ok {
+		return nil, s.redisPool.Put(conn, err)
+	}
+
+	// 从Redis获取
+	val, err := client.HGet(ctx, s.prefix+s.id, key).Result()
+	if err != nil {
+		return nil, s.redisPool.Put(conn, err)
 	}
 
 	// 反序列化
 	var result any
 	err = json.Unmarshal([]byte(val), &result)
 	if err != nil {
-		return nil, err
+		return nil, s.redisPool.Put(conn, err)
 	}
 
 	// 更新本地缓存
@@ -54,7 +68,7 @@ func (s *Session) Get(ctx context.Context, key string) (any, error) {
 	s.data[key] = result
 	s.mu.Unlock()
 
-	return result, nil
+	return result, s.redisPool.Put(conn, nil)
 }
 
 // Set 设置session中的值
@@ -65,10 +79,23 @@ func (s *Session) Set(ctx context.Context, key string, value any) error {
 		return fmt.Errorf("failed to serialize value: %v", err)
 	}
 
-	// 保存到Redis
-	err = s.sessionRedis.HSet(ctx, s.prefix+s.id, key, string(data)).Err()
+	// 从连接池获取一个连接
+	conn, err := s.redisPool.Get(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to save to redis: %v", err)
+		return err
+	}
+	defer conn.Close()
+
+	// 获取底层Redis客户端
+	client, ok := conn.Raw().(*redis.Client)
+	if !ok {
+		return s.redisPool.Put(conn, err)
+	}
+
+	// 保存到Redis
+	err = client.HSet(ctx, s.prefix+s.id, key, string(data)).Err()
+	if err != nil {
+		return s.redisPool.Put(conn, fmt.Errorf("failed to save to redis: %v", err))
 	}
 
 	// 更新本地缓存
@@ -78,12 +105,12 @@ func (s *Session) Set(ctx context.Context, key string, value any) error {
 
 	// 在写入时刷新session
 	if s.expiration > 0 {
-		if err := s.Touch(ctx); err != nil {
-			return fmt.Errorf("failed to refresh session: %w", err)
+		if err := client.Expire(ctx, s.prefix+s.id, s.expiration).Err(); err != nil {
+			return s.redisPool.Put(conn, fmt.Errorf("failed to refresh session: %w", err))
 		}
 	}
 
-	return nil
+	return s.redisPool.Put(conn, nil)
 }
 
 // ID 返回session ID
@@ -97,6 +124,20 @@ func (s *Session) Touch(ctx context.Context) error {
 		return nil
 	}
 
+	// 从连接池获取一个连接
+	conn, err := s.redisPool.Get(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	// 获取底层Redis客户端
+	client, ok := conn.Raw().(*redis.Client)
+	if !ok {
+		return s.redisPool.Put(conn, err)
+	}
+
 	// 更新过期时间
-	return s.sessionRedis.Expire(ctx, s.prefix+s.id, s.expiration).Err()
+	err = client.Expire(ctx, s.prefix+s.id, s.expiration).Err()
+	return s.redisPool.Put(conn, err)
 }
