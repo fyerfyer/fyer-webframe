@@ -1,0 +1,144 @@
+package models
+
+import (
+    "errors"
+    "sync"
+    "time"
+)
+
+// User 定义用户模型
+type User struct {
+    ID        int64     `json:"id"`
+    Username  string    `json:"username"`
+    Email     string    `json:"email"`
+    Password  string    `json:"-"` // 不在JSON响应中显示密码
+    CreatedAt time.Time `json:"created_at"`
+    UpdatedAt time.Time `json:"updated_at"`
+}
+
+// UserStore 定义简单的用户存储
+// 这只是一个内存用户存储的示例，实际应用中应该使用数据库
+type UserStore struct {
+    mu       sync.RWMutex
+    users    map[int64]*User
+    sequence int64
+}
+
+// NewUserStore 创建一个新的用户存储
+func NewUserStore() *UserStore {
+    return &UserStore{
+        users:    make(map[int64]*User),
+        sequence: 0,
+    }
+}
+
+// GetByID 根据ID获取用户
+func (s *UserStore) GetByID(id int64) (*User, error) {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+
+    user, exists := s.users[id]
+    if !exists {
+        return nil, errors.New("user not found")
+    }
+    return user, nil
+}
+
+// GetByUsername 根据用户名获取用户
+func (s *UserStore) GetByUsername(username string) (*User, error) {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+
+    for _, user := range s.users {
+        if user.Username == username {
+            return user, nil
+        }
+    }
+    return nil, errors.New("user not found")
+}
+
+// Create 创建新用户
+func (s *UserStore) Create(username, email, password string) (*User, error) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    // 检查用户名是否已存在
+    for _, user := range s.users {
+        if user.Username == username {
+            return nil, errors.New("username already exists")
+        }
+        if user.Email == email {
+            return nil, errors.New("email already exists")
+        }
+    }
+
+    now := time.Now()
+    s.sequence++
+    user := &User{
+        ID:        s.sequence,
+        Username:  username,
+        Email:     email,
+        Password:  password, // 注意：实际应用中应该哈希密码
+        CreatedAt: now,
+        UpdatedAt: now,
+    }
+    s.users[user.ID] = user
+    return user, nil
+}
+
+// Update 更新用户信息
+func (s *UserStore) Update(id int64, updates map[string]interface{}) (*User, error) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    user, exists := s.users[id]
+    if !exists {
+        return nil, errors.New("user not found")
+    }
+
+    // 应用更新
+    for key, value := range updates {
+        switch key {
+        case "username":
+            if username, ok := value.(string); ok {
+                user.Username = username
+            }
+        case "email":
+            if email, ok := value.(string); ok {
+                user.Email = email
+            }
+        case "password":
+            if password, ok := value.(string); ok {
+                user.Password = password // 实际应用中应该哈希密码
+            }
+        }
+    }
+
+    user.UpdatedAt = time.Now()
+    return user, nil
+}
+
+// Delete 删除用户
+func (s *UserStore) Delete(id int64) error {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    if _, exists := s.users[id]; !exists {
+        return errors.New("user not found")
+    }
+
+    delete(s.users, id)
+    return nil
+}
+
+// GetAll 获取所有用户
+func (s *UserStore) GetAll() []*User {
+    s.mu.RLock()
+    defer s.mu.RUnlock()
+
+    result := make([]*User, 0, len(s.users))
+    for _, user := range s.users {
+        result = append(result, user)
+    }
+    return result
+}

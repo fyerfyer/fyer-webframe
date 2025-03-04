@@ -4,6 +4,7 @@ go 1.23.5
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/fsnotify/fsnotify v1.4.9
 	github.com/fyerfyer/fyer-kit v0.0.1
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/google/uuid v1.6.0
@@ -26,6 +27,7 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
