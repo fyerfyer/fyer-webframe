@@ -60,7 +60,7 @@ func main() {
 
     // 静态文件服务
     fs := http.Dir("./public")
-    server.Get("/public/*file", func(ctx *web.Context) {
+    server.Get("/public/:file", func(ctx *web.Context) {
         filePath := ctx.PathParam("file").Value
         ctx.FileFromFS(filePath, fs)
     })
