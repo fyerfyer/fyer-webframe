@@ -31,6 +31,7 @@ type Server interface {
 
 	// 模板引擎
 	UseTemplate(tpl Template) Server
+	GetTemplateEngine() Template
 }
 
 // RouteRegister 路由链式注册接口
@@ -268,6 +269,11 @@ func (s *HTTPServer) Middleware() MiddlewareManager {
 func (s *HTTPServer) UseTemplate(tpl Template) Server {
 	s.tplEngine = tpl
 	return s
+}
+
+// GetTemplateEngine 返回服务器使用的模板引擎
+func (s *HTTPServer) GetTemplateEngine() Template {
+	return s.tplEngine
 }
 
 // PoolManager 返回连接池管理器
