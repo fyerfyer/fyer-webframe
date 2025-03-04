@@ -13,7 +13,6 @@ type ProjectGenerator struct {
 	ProjectName string    // 项目名称
 	ModulePath  string    // Go模块路径
 	OutputPath  string    // 输出路径
-	Version     string    // 框架版本
 	Templates   []Template // 项目模板
 }
 
@@ -35,11 +34,11 @@ func WithGenOutputPath(outputPath string) GeneratorOption {
 }
 
 // WithGenVersion 设置框架版本
-func WithGenVersion(version string) GeneratorOption {
-	return func(g *ProjectGenerator) {
-		g.Version = version
-	}
-}
+//func WithGenVersion(version string) GeneratorOption {
+//	return func(g *ProjectGenerator) {
+//		g.Version = version
+//	}
+//}
 
 // WithGenTemplates 设置自定义模板列表
 func WithGenTemplates(templates []Template) GeneratorOption {
@@ -55,7 +54,6 @@ func NewProjectGenerator(projectName string, opts ...GeneratorOption) *ProjectGe
 		ProjectName: projectName,
 		ModulePath:  "github.com/" + projectName,
 		OutputPath:  projectName,
-		Version:     "1.0.0",
 		Templates:   projectTemplates,
 	}
 

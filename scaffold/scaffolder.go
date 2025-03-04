@@ -15,7 +15,6 @@ type ProjectScaffolder struct {
 	ProjectName string    // 项目名称
 	ModulePath  string    // 模块路径
 	OutputPath  string    // 输出路径
-	Version     string    // 框架版本
 	CreatedAt   time.Time // 创建时间
 }
 
@@ -43,7 +42,6 @@ func NewProjectScaffolder(projectName string, opts ...ScaffoldOption) *ProjectSc
 		ProjectName: projectName,
 		ModulePath:  "github.com/" + projectName,
 		OutputPath:  projectName,
-		Version:     getFrameworkVersion(),
 		CreatedAt:   time.Now(),
 	}
 
@@ -56,11 +54,11 @@ func NewProjectScaffolder(projectName string, opts ...ScaffoldOption) *ProjectSc
 }
 
 // getFrameworkVersion 获取当前框架版本
-func getFrameworkVersion() string {
-	// 在实际生产环境中可以从框架package导入版本信息
-	// 这里简单返回一个固定版本
-	return "1.0.0"
-}
+//func getFrameworkVersion() string {
+//	// 在实际生产环境中可以从框架package导入版本信息
+//	// 这里简单返回一个固定版本
+//	return "1.0.0"
+//}
 
 // Generate 生成项目脚手架
 func (ps *ProjectScaffolder) Generate() error {
@@ -178,7 +176,7 @@ func (ps *ProjectScaffolder) initGoModule() error {
 	}
 
 	// 添加框架依赖
-	getCmd := exec.Command("go", "get", fmt.Sprintf("github.com/fyerfyer/fyer-webframe@%s", ps.Version))
+	getCmd := exec.Command("go", "get", "github.com/fyerfyer/fyer-webframe")
 	getCmd.Dir = ps.OutputPath
 	getCmd.Stdout = os.Stdout
 	getCmd.Stderr = os.Stderr
@@ -210,7 +208,7 @@ func (ps *ProjectScaffolder) installDependencies() error {
 	// 构建依赖映射
 	deps := []string{
 		// 添加框架依赖
-		fmt.Sprintf("github.com/fyerfyer/fyer-webframe@%s", ps.Version),
+		"github.com/fyerfyer/fyer-webframe",
 	}
 
 	// 如果是在开发模式，使用replace指令指向本地框架目录
@@ -275,7 +273,6 @@ func (ps *ProjectScaffolder) GetProjectInfo() string {
 	sb.WriteString(fmt.Sprintf("Project: %s\n", ps.ProjectName))
 	sb.WriteString(fmt.Sprintf("Module: %s\n", ps.ModulePath))
 	sb.WriteString(fmt.Sprintf("Created at: %s\n", ps.CreatedAt.Format(time.RFC1123)))
-	sb.WriteString(fmt.Sprintf("Framework version: %s\n", ps.Version))
 	sb.WriteString(fmt.Sprintf("Location: %s\n", filepath.Join(ps.OutputPath)))
 
 	return sb.String()

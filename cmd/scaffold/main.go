@@ -17,12 +17,11 @@ var (
 	modulePath  = flag.String("module", "", "Go module path (default: github.com/{project-name})")
 	outputPath  = flag.String("output", "", "Output directory (default: ./{project-name})")
 	runFlag     = flag.Bool("run", false, "Run the project after creation")
-	version     = "1.0.0" // 当前脚手架版本
 )
 
 // usage 显示使用帮助信息
 func usage() {
-	fmt.Printf("Fyer Web Framework Project Scaffold v%s\n\n", version)
+	fmt.Printf("Fyer Web Framework Project Scaffold\n\n")
 	fmt.Println("Usage:")
 	fmt.Printf("  %s [options]\n\n", os.Args[0])
 	fmt.Println("Options:")
