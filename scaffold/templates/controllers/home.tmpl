@@ -33,7 +33,6 @@ func (c *HomeController) About(ctx *web.Context) {
     data := map[string]interface{}{
         "Title":   "关于 {{ .ProjectName }}",
         "Message": "这是一个使用fyer-webframe框架创建的Web应用。",
-        "Version": "{{ .Version }}",
     }
 
     err := ctx.Template("home.html", data)
