@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"unsafe"
 
 	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 )
@@ -369,6 +370,36 @@ func (s *Selector[T]) Build() (*Query, error) {
 }
 
 // scanRow 将一行数据扫描到结构体中
+// reflect version
+//func (s *Selector[T]) scanRow(rows *sql.Rows) (*T, error) {
+//	cols, err := rows.Columns()
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	t := new(T)
+//	vals := make([]any, len(cols))
+//	// new返回的是指针
+//	valElem := reflect.ValueOf(t).Elem()
+//
+//	for i, col := range cols {
+//		if fieldName, ok := s.model.colNameMap[col]; ok {
+//			field := valElem.FieldByName(fieldName)
+//			vals[i] = field.Addr().Interface()
+//		} else {
+//			var v any
+//			vals[i] = &v
+//		}
+//	}
+//
+//	if err = rows.Scan(vals...); err != nil {
+//		return nil, err
+//	}
+//
+//	return t, nil
+//}
+
+// scanRow 将一行数据扫描到结构体中
 func (s *Selector[T]) scanRow(rows *sql.Rows) (*T, error) {
 	cols, err := rows.Columns()
 	if err != nil {
@@ -377,20 +408,64 @@ func (s *Selector[T]) scanRow(rows *sql.Rows) (*T, error) {
 
 	t := new(T)
 	vals := make([]any, len(cols))
-	// new返回的是指针
-	valElem := reflect.ValueOf(t).Elem()
 
-	for i, col := range cols {
-		if fieldName, ok := s.model.colNameMap[col]; ok {
-			field := valElem.FieldByName(fieldName)
-			vals[i] = field.Addr().Interface()
-		} else {
-			var v any
-			vals[i] = &v
+	// 获取结构体的值和类型
+	value := reflect.ValueOf(t).Elem()
+	typ := value.Type()
+	// 获取结构体最初的地址
+	baseAddr := unsafe.Pointer(reflect.ValueOf(t).Pointer())
+
+	// 储存字段的地址与类型
+	fieldAddrs := make(map[string]unsafe.Pointer)
+	fieldTypes := make(map[string]reflect.Type)
+
+	// 预先计算字段的地址
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		fieldName := field.Name
+
+		if field.PkgPath != "" {
+			continue
+		}
+
+		// 计算地址
+		fieldAddr := unsafe.Add(baseAddr, field.Offset)
+		// 直接存储字段名
+		//fieldAddrs[fieldName] = fieldAddr
+		//fieldTypes[fieldName] = field.Type
+
+		// 存储列名的相关信息
+		if s.model != nil && s.model.fieldsMap != nil {
+			if fieldMeta, ok := s.model.fieldsMap[fieldName]; ok {
+				fieldAddrs[fieldMeta.colName] = fieldAddr
+				fieldTypes[fieldMeta.colName] = field.Type
+			}
 		}
 	}
 
-	if err = rows.Scan(vals...); err != nil {
+	// 创建scan列表
+	for i, col := range cols {
+		if addr, ok := fieldAddrs[col]; ok {
+			vals[i] = reflect.NewAt(fieldTypes[col], addr).Interface()
+			continue
+		}
+
+		// 通过字段名找到对应的模型的列名
+		//if s.model != nil && s.model.colNameMap != nil {
+		//	if fieldName, ok := s.model.colNameMap[col]; ok {
+		//		if addr, ok := fieldAddrs[fieldName]; ok {
+		//			vals[i] = reflect.NewAt(fieldTypes[fieldName], addr).Interface()
+		//			continue
+		//		}
+		//	}
+		//}
+
+		// No match, use a dummy variable
+		var dummy any
+		vals[i] = &dummy
+	}
+
+	if err := rows.Scan(vals...); err != nil {
 		return nil, err
 	}
 
