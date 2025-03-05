@@ -25,6 +25,8 @@ func main() {
         web.WithTemplate(
             web.NewGoTemplate(
                 web.WithFiles("./views/layout.html", "./views/home.html"),
+                web.WithPattern(*templatePattern), // 添加模式匹配支持热重载
+                web.WithAutoReload(true),          // 启用自动重载
             ),
         ),
     )

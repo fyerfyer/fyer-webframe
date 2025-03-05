@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type Template interface {
@@ -20,10 +21,12 @@ type Template interface {
 
 type GoTemplate struct {
 	sync.RWMutex
-	tplPattern string             // 模板文件匹配模式
-	tplFiles   []string           // 模板文件列表
-	tpl        *template.Template // 已编译的模板
-	funcMap    template.FuncMap   // 自定义模板函数
+	tplPattern  string             // 模板文件匹配模式
+	tplFiles    []string           // 模板文件列表
+	tpl         *template.Template // 已编译的模板
+	funcMap     template.FuncMap   // 自定义模板函数
+	autoReload  bool               // 是否启用自动重载
+	lastChecked time.Time          // 最后检查时间
 }
 
 type GoTemplateOption func(*GoTemplate)
@@ -49,10 +52,22 @@ func WithFuncMap(funcMap template.FuncMap) GoTemplateOption {
 	}
 }
 
+// WithAutoReload 设置是否启用自动重载
+func WithAutoReload(auto bool) GoTemplateOption {
+	return func(t *GoTemplate) {
+		t.autoReload = auto
+		if auto {
+			// 启动后台监控
+			go t.watchTemplates()
+		}
+	}
+}
+
 func NewGoTemplate(opts ...GoTemplateOption) *GoTemplate {
 	t := &GoTemplate{
-		tpl:     template.New(""),
-		funcMap: make(template.FuncMap),
+		tpl:        template.New(""),
+		funcMap:    make(template.FuncMap),
+		lastChecked: time.Now(),
 	}
 
 	for _, opt := range opts {
@@ -139,10 +154,20 @@ func (g *GoTemplate) LoadFromFiles(files ...string) error {
 // Reload 重新加载模板
 func (g *GoTemplate) Reload() error {
 	if g.tplPattern != "" {
-		return g.LoadFromGlob(g.tplPattern)
+		err := g.LoadFromGlob(g.tplPattern)
+		if err == nil {
+			g.lastChecked = time.Now()
+			fmt.Println("Templates reloaded from pattern:", g.tplPattern)
+		}
+		return err
 	}
 	if len(g.tplFiles) > 0 {
-		return g.LoadFromFiles(g.tplFiles...)
+		err := g.LoadFromFiles(g.tplFiles...)
+		if err == nil {
+			g.lastChecked = time.Now()
+			fmt.Println("Templates reloaded from files:", g.tplFiles)
+		}
+		return err
 	}
 	return errors.New("no template source defined")
 }
@@ -230,3 +255,64 @@ func (g *GoTemplate) LoadFromFS(fsys fs.FS, patterns ...string) error {
 	g.tpl = temp
 	return nil
 }
+
+// watchTemplates 监控模板文件变更
+func (g *GoTemplate) watchTemplates() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if g.checkNeedsReload() {
+			if err := g.Reload(); err != nil {
+				fmt.Printf("Template reload error: %v\n", err)
+			} else {
+				fmt.Println("Templates reloaded successfully")
+			}
+		}
+	}
+}
+
+// checkNeedsReload 检查模板是否需要重新加载
+func (g *GoTemplate) checkNeedsReload() bool {
+	g.RLock()
+	defer g.RUnlock()
+
+	// 如果没有模板文件模式，无法检查
+	if g.tplPattern == "" && len(g.tplFiles) == 0 {
+		return false
+	}
+
+	// 检查基于模式匹配的模板
+	if g.tplPattern != "" {
+		matches, err := filepath.Glob(g.tplPattern)
+		if err != nil {
+			return false
+		}
+
+		for _, file := range matches {
+			info, err := os.Stat(file)
+			if err != nil {
+				continue
+			}
+			if info.ModTime().After(g.lastChecked) {
+				g.lastChecked = time.Now()
+				return true
+			}
+		}
+	}
+
+	// 检查基于文件列表的模板
+	for _, file := range g.tplFiles {
+		info, err := os.Stat(file)
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(g.lastChecked) {
+			g.lastChecked = time.Now()
+			return true
+		}
+	}
+
+	return false
+}
+
