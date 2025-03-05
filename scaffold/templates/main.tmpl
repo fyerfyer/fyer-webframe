@@ -23,7 +23,9 @@ func main() {
     // 创建 HTTP 服务器
     server := web.NewHTTPServer(
         web.WithTemplate(
-            web.NewGoTemplate(web.WithPattern("./views/*.html")),
+            web.NewGoTemplate(
+                web.WithFiles("./views/layout.html", "./views/home.html"),
+            ),
         ),
     )
 
@@ -33,7 +35,7 @@ func main() {
             start := time.Now()
             next(ctx)
             duration := time.Since(start)
-            fmt.Printf("[%s] %s - %d - %v\n", 
+            fmt.Printf("[%s] %s - %d - %v\n",
                 ctx.Req.Method, ctx.Req.URL.Path, ctx.RespStatusCode, duration)
         }
     })
@@ -53,16 +55,22 @@ func main() {
 
     // 注册控制器
     homeController := controllers.NewHomeController()
-    
+
     // 注册路由
     server.Get("/", homeController.Index)
     server.Get("/about", homeController.About)
+    server.Get("/api", homeController.API)
 
-    // 静态文件服务
-    fs := http.Dir("./public")
+    // 静态文件服务 - 使用 :file 参数
     server.Get("/public/:file", func(ctx *web.Context) {
+        // 获取文件路径参数
         filePath := ctx.PathParam("file").Value
-        ctx.FileFromFS(filePath, fs)
+
+        // 创建安全的文件路径
+        safePath := "./public/" + filePath
+
+        // 使用标准库的文件服务处理
+        http.ServeFile(ctx.Resp, ctx.Req, safePath)
     })
 
     // 启动服务器

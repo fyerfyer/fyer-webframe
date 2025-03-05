@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -10,18 +11,18 @@ import (
 
 // ContentType 常用的内容类型常量
 const (
-	ContentTypeJSON           = "application/json; charset=utf-8"
-	ContentTypeXML            = "application/xml; charset=utf-8"
-	ContentTypePlain          = "text/plain; charset=utf-8"
-	ContentTypeHTML           = "text/html; charset=utf-8"
-	ContentTypeForm           = "application/x-www-form-urlencoded"
-	ContentTypeMultipartForm  = "multipart/form-data"
-	ContentTypeOctetStream    = "application/octet-stream"
-	ContentTypeAttachment     = "attachment"
-	ContentTypeEventStream    = "text/event-stream; charset=utf-8"
-	ContentTypeYAML           = "application/yaml; charset=utf-8"
-	ContentTypeProblemJSON    = "application/problem+json"
-	ContentTypeProblemXML     = "application/problem+xml"
+	ContentTypeJSON          = "application/json; charset=utf-8"
+	ContentTypeXML           = "application/xml; charset=utf-8"
+	ContentTypePlain         = "text/plain; charset=utf-8"
+	ContentTypeHTML          = "text/html; charset=utf-8"
+	ContentTypeForm          = "application/x-www-form-urlencoded"
+	ContentTypeMultipartForm = "multipart/form-data"
+	ContentTypeOctetStream   = "application/octet-stream"
+	ContentTypeAttachment    = "attachment"
+	ContentTypeEventStream   = "text/event-stream; charset=utf-8"
+	ContentTypeYAML          = "application/yaml; charset=utf-8"
+	ContentTypeProblemJSON   = "application/problem+json"
+	ContentTypeProblemXML    = "application/problem+xml"
 )
 
 // ResponseHelper 为 Context 添加响应帮助方法
@@ -138,20 +139,35 @@ func (c *Context) HTML(code int, html string) error {
 
 // Template 渲染模板并返回
 func (c *Context) Template(name string, data any) error {
+	//fmt.Printf("DEBUG Template: Starting render template '%s'\n", name)
+
 	if c.tplEngine == nil {
-		return fmt.Errorf("template engine not configured")
+		//fmt.Println("DEBUG Template: Template engine not set")
+		return errors.New("template engine not set")
 	}
 
 	result, err := c.tplEngine.Render(c, name, data)
 	if err != nil {
-		return err
+		//fmt.Printf("DEBUG Template: Render error: %v\n", err)
+		return fmt.Errorf("failed to render template: %w", err)
 	}
 
+	// 设置内容类型为HTML
 	c.Resp.Header().Set("Content-Type", ContentTypeHTML)
-	c.RespStatusCode = http.StatusOK
+
+	// 设置响应数据
 	c.RespData = result
-	c.unhandled = true
+	c.RespStatusCode = http.StatusOK
+
 	return nil
+}
+
+// 辅助函数获取最小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // Attachment 下载附件
@@ -296,4 +312,3 @@ func (c *Context) Problem(code int, problem *ProblemDetails) error {
 	c.unhandled = true
 	return nil
 }
-

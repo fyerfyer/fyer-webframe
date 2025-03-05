@@ -16,31 +16,29 @@ import (
 
 // HotReloadServer 负责应用程序的热重载功能
 type HotReloadServer struct {
-	config       *Config        // 热重载配置
-	watcher      *Watcher       // 文件系统监视器
-	cmd          *exec.Cmd      // 当前运行的应用程序进程
-	manager      *Manager       // 关联的热重载管理器
-	stdout       io.Writer      // 标准输出
-	stderr       io.Writer      // 错误输出
-	buildMutex   sync.Mutex     // 构建和重启互斥锁
-	running      bool           // 服务器是否正在运行
-	stopping     bool           // 服务器是否正在停止
-	lastBuild    time.Time      // 最后一次构建时间
-	lastStart    time.Time      // 最后一次启动时间
-	processMutex sync.Mutex     // 进程操作互斥锁
-	buildError   error          // 最后一次构建错误
-	startError   error          // 最后一次启动错误
-	done         chan struct{}  // 服务器停止信号
-	restarting   bool           // 是否正在重启中
-	tempBinPath  string         // 临时可执行文件路径
+	config       *Config       // 热重载配置
+	watcher      *Watcher      // 文件系统监视器
+	cmd          *exec.Cmd     // 当前运行的应用程序进程
+	manager      *Manager      // 关联的热重载管理器
+	stdout       io.Writer     // 标准输出
+	stderr       io.Writer     // 错误输出
+	buildMutex   sync.Mutex    // 构建和重启互斥锁
+	running      bool          // 服务器是否正在运行
+	stopping     bool          // 服务器是否正在停止
+	lastBuild    time.Time     // 最后一次构建时间
+	lastStart    time.Time     // 最后一次启动时间
+	processMutex sync.Mutex    // 进程操作互斥锁
+	buildError   error         // 最后一次构建错误
+	startError   error         // 最后一次启动错误
+	done         chan struct{} // 服务器停止信号
+	restarting   bool          // 是否正在重启中
+	tempBinPath  string        // 临时可执行文件路径
 
 	testBuildAndRunFunc func() error // 仅测试使用
 }
 
 // ServerOption 定义服务器配置选项
 type ServerOption func(*HotReloadServer)
-
-
 
 // NewHotReloadServer 创建一个新的热重载服务器实例
 func NewHotReloadServer(config *Config, manager *Manager, opts ...ServerOption) (*HotReloadServer, error) {
@@ -114,7 +112,7 @@ func (s *HotReloadServer) Start() error {
 
 	// 执行初始构建和启动
 	if err := s.buildAndRun(); err != nil {
-		fmt.Fprintf(s.stderr, "❌  initial build failed: %v\n", err)
+		fmt.Fprintf(s.stderr, "❌ initial build failed: %v\n", err)
 		// 即使初始构建失败，我们也继续运行以等待文件修复
 	}
 
@@ -193,13 +191,8 @@ func (s *HotReloadServer) buildAndRun() error {
 		// 继续执行，尝试强制重启
 	}
 
-	// 构建应用
-	if err := s.buildApp(); err != nil {
-		s.buildError = err
-		return fmt.Errorf("failed to build application: %w", err)
-	}
-
-	// 构建成功后运行
+	// 在dev模式下，我们使用go run，所以实际上不需要构建步骤
+	// 我们可以直接运行应用
 	if err := s.runApp(); err != nil {
 		s.startError = err
 		return fmt.Errorf("failed to start application: %w", err)
@@ -295,7 +288,7 @@ func (s *HotReloadServer) buildApp() error {
 
 	s.lastBuild = time.Now()
 	duration := time.Since(startTime)
-	fmt.Fprintf(s.stdout, "✅  build successfully in: %v\n", duration)
+	fmt.Fprintf(s.stdout, "✅ build successfully in: %v\n", duration)
 
 	return nil
 }
@@ -319,13 +312,13 @@ func (s *HotReloadServer) runApp() error {
 		}
 	}
 
-	// 准备应用命令
-	appCmd := s.tempBinPath
-	appArgs := make([]string, len(s.config.AppArgs))
-	copy(appArgs, s.config.AppArgs)
+	// 使用go run来直接运行应用，不需要构建二进制文件
+	appArgs := []string{"run", s.config.EntryPoint}
+	// 添加应用参数
+	appArgs = append(appArgs, s.config.AppArgs...)
 
 	// 创建命令
-	cmd := exec.Command(appCmd, appArgs...)
+	cmd := exec.Command("go", appArgs...)
 
 	// 设置环境变量
 	env := os.Environ()
@@ -335,7 +328,10 @@ func (s *HotReloadServer) runApp() error {
 	cmd.Env = env
 
 	// 设置工作目录
-	cmd.Dir = filepath.Dir(s.config.EntryPoint)
+	entryDir := filepath.Dir(s.config.EntryPoint)
+	if entryDir != "" && entryDir != "." {
+		cmd.Dir = entryDir
+	}
 
 	// 配置输出
 	var appOutput io.Writer
@@ -354,14 +350,14 @@ func (s *HotReloadServer) runApp() error {
 
 	s.cmd = cmd
 	s.lastStart = time.Now()
-	fmt.Fprintf(s.stdout, "✅ application started (PID: %d)\n", cmd.Process.Pid)
+	fmt.Fprintf(s.stdout, "✅ application started with 'go run' (PID: %d)\n", cmd.Process.Pid)
 
 	// 在后台监控应用进程
 	go func() {
 		if err := cmd.Wait(); err != nil {
 			if !s.stopping && !s.restarting {
-				fmt.Fprintf(s.stderr, "❌ application exits with an exception: %v\n", err)
-				// 如果不是因为我们停止或重启，自动重新构建运行
+				fmt.Fprintf(s.stderr, "❌ application exited with an exception: %v\n", err)
+				// 如果不是因为我们停止或重启，自动重新运行
 				_ = s.Restart()
 			}
 		}

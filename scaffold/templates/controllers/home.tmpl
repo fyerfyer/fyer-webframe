@@ -2,6 +2,7 @@ package controllers
 
 import (
     "net/http"
+    "time"
 
     "github.com/fyerfyer/fyer-webframe/web"
 )
@@ -17,13 +18,15 @@ func NewHomeController() *HomeController {
 // Index 处理首页请求
 func (c *HomeController) Index(ctx *web.Context) {
     data := map[string]interface{}{
-        "Title":   "欢迎使用 {{ .ProjectName }}",
-        "Message": "您的应用已成功运行！",
+        "Title":       "欢迎使用 {{ .ProjectName }}",
+        "Message":     "您的应用已成功运行！",
+        "ProjectName": "{{ .ProjectName }}",
+        "CurrentYear": time.Now().Format("2006"),
     }
 
-    err := ctx.Template("home.html", data)
+    err := ctx.Template("layout.html", data)
     if err != nil {
-        ctx.InternalServerError("无法渲染首页模板")
+        ctx.String(http.StatusInternalServerError, "无法渲染首页模板: "+err.Error())
         return
     }
 }
@@ -31,13 +34,15 @@ func (c *HomeController) Index(ctx *web.Context) {
 // About 处理关于页面请求
 func (c *HomeController) About(ctx *web.Context) {
     data := map[string]interface{}{
-        "Title":   "关于 {{ .ProjectName }}",
-        "Message": "这是一个使用fyer-webframe框架创建的Web应用。",
+        "Title":       "关于 {{ .ProjectName }}",
+        "Message":     "这是一个使用fyer-webframe框架创建的Web应用。",
+        "ProjectName": "{{ .ProjectName }}",
+        "CurrentYear": time.Now().Format("2006"),
     }
 
-    err := ctx.Template("home.html", data)
+    err := ctx.Template("layout.html", data)
     if err != nil {
-        ctx.InternalServerError("无法渲染关于页面模板")
+        ctx.String(http.StatusInternalServerError, "无法渲染关于页面模板: "+err.Error())
         return
     }
 }
@@ -47,13 +52,15 @@ func (c *HomeController) NotFound(ctx *web.Context) {
     ctx.Status(http.StatusNotFound)
 
     data := map[string]interface{}{
-        "Title":   "404 - 页面未找到",
-        "Message": "您请求的页面不存在。",
+        "Title":       "404 - 页面未找到",
+        "Message":     "您请求的页面不存在。",
+        "ProjectName": "{{ .ProjectName }}",
+        "CurrentYear": time.Now().Format("2006"),
     }
 
-    err := ctx.Template("home.html", data)
+    err := ctx.Template("layout.html", data)
     if err != nil {
-        ctx.NotFound("页面未找到")
+        ctx.String(http.StatusNotFound, "页面未找到")
     }
 }
 
@@ -62,13 +69,15 @@ func (c *HomeController) Error(ctx *web.Context) {
     ctx.Status(http.StatusInternalServerError)
 
     data := map[string]interface{}{
-        "Title":   "500 - 服务器错误",
-        "Message": "服务器处理您的请求时出现了问题。",
+        "Title":       "500 - 服务器错误",
+        "Message":     "服务器处理您的请求时出现了问题。",
+        "ProjectName": "{{ .ProjectName }}",
+        "CurrentYear": time.Now().Format("2006"),
     }
 
-    err := ctx.Template("home.html", data)
+    err := ctx.Template("layout.html", data)
     if err != nil {
-        ctx.InternalServerError("服务器内部错误")
+        ctx.String(http.StatusInternalServerError, "服务器内部错误: "+err.Error())
     }
 }
 

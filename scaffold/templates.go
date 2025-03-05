@@ -56,6 +56,23 @@ func ParseTemplateContent(content string, data TemplateData) (string, error) {
 		data.CurrentYear = time.Now().Format("2006")
 	}
 
+	// 确保模板引擎能找到所有需要的变量
+	if data.Message == "" {
+		data.Message = "Welcome to " + data.ProjectName
+	}
+
+	// 检查是否是HTML模板文件
+	if strings.Contains(content, "{{define") || strings.Contains(content, "{{block") {
+		// 简单替换项目名称等信息，而不破坏HTML模板语法
+		content = strings.ReplaceAll(content, "{{ .ProjectName }}", data.ProjectName)
+		content = strings.ReplaceAll(content, "{{ .ModulePath }}", data.ModulePath)
+		content = strings.ReplaceAll(content, "{{ .CurrentYear }}", data.CurrentYear)
+		content = strings.ReplaceAll(content, "{{ .Title }}", data.Title)
+		content = strings.ReplaceAll(content, "{{ .Message }}", data.Message)
+		return content, nil
+	}
+
+	// 常规模板处理
 	tmpl, err := template.New("template").Parse(content)
 	if err != nil {
 		return "", err
