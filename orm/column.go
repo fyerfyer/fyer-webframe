@@ -41,34 +41,45 @@ func FromTable(tableStruct any, col *Column) *Column {
 	return col
 }
 
+// getDialect 获取当前模型对应的方言
+func (c *Column) getDialect() Dialect {
+	if c.model != nil && c.model.dialect != nil {
+		return c.model.dialect
+	}
+	// 默认使用MySQL方言
+	return &Mysql{}
+}
+
 func (c *Column) Build(builder *strings.Builder) {
+	dialect := c.getDialect()
+
 	// 这里只有两种情况：join已有的表或者join一个子查询
 	// 只有在这里，找不到对应的列的话才设置成延迟解析
 	// 其他情况直接panic
 	if c.table != "" {
-		builder.WriteString("`" + c.table + "`.")
+		builder.WriteString(dialect.Quote(c.table) + ".")
 		if c.fromModel == nil && c.model == nil {
 			// 先不panic，而是把这个列标为延迟解析
 			// 因为可能是在子查询中使用的列，而子查询的模型信息在后面才能获取到
 			// 所以先把它写上，等之后发现这个列是不合法的的时候再panic
-			builder.WriteString("`" + c.name + "`")
+			builder.WriteString(dialect.Quote(c.name))
 			return
 		}
 		if c.fromModel != nil {
 			if alias, ok := c.fromModel.tableAliasMap[c.table]; ok {
-				builder.WriteString("`" + alias + "`.")
+				builder.WriteString(dialect.Quote(alias) + ".")
 			}
 		} else if alias, ok := c.model.tableAliasMap[c.table]; ok {
-			builder.WriteString("`" + alias + "`.")
+			builder.WriteString(dialect.Quote(alias) + ".")
 		}
 	}
 
 	// 优先使用fromModel查找字段
 	if c.fromModel != nil {
 		if col, ok := c.fromModel.fieldsMap[c.name]; ok {
-			builder.WriteString("`" + col.colName + "`")
+			builder.WriteString(dialect.Quote(col.colName))
 			if c.alias != "" {
-				builder.WriteString(" AS `" + c.alias + "`")
+				builder.WriteString(" AS " + dialect.Quote(c.alias))
 				c.fromModel.colAliasMap[c.alias] = true
 			}
 			return
@@ -76,7 +87,7 @@ func (c *Column) Build(builder *strings.Builder) {
 
 		if c.allowAlias {
 			if c.alias != "" {
-				builder.WriteString("`" + c.alias + "`")
+				builder.WriteString(dialect.Quote(c.alias))
 				c.fromModel.colAliasMap[c.alias] = true
 				return
 			}
@@ -85,9 +96,9 @@ func (c *Column) Build(builder *strings.Builder) {
 
 	// 回退到原有的查找逻辑
 	if col, ok := c.model.fieldsMap[c.name]; ok {
-		builder.WriteString("`" + col.colName + "`")
+		builder.WriteString(dialect.Quote(col.colName))
 		if c.alias != "" {
-			builder.WriteString(" AS `" + c.alias + "`")
+			builder.WriteString(" AS " + dialect.Quote(c.alias))
 			c.model.colAliasMap[c.alias] = true
 		}
 		return
@@ -95,11 +106,11 @@ func (c *Column) Build(builder *strings.Builder) {
 
 	if c.allowAlias {
 		if c.alias != "" {
-			builder.WriteString("`" + c.alias + "`")
+			builder.WriteString(dialect.Quote(c.alias))
 			c.model.colAliasMap[c.alias] = true
 			return
 		} else if _, ok := c.model.colAliasMap[c.name]; ok {
-			builder.WriteString("`" + c.name + "`")
+			builder.WriteString(dialect.Quote(c.name))
 			return
 		}
 	}

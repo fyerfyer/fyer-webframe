@@ -29,7 +29,9 @@ func (p *Predicate) buildExpr(expr Expression, builder *strings.Builder, args *[
 		e.model = p.model
 		e.Build(builder)
 	case *Value:
-		builder.WriteByte('?')
+		//builder.WriteByte('?')
+		builder.WriteString(p.model.dialect.Placeholder(p.model.index))
+		p.model.index++
 		*args = append(*args, e.val)
 	case *Predicate:
 		e.model = p.model
@@ -37,7 +39,8 @@ func (p *Predicate) buildExpr(expr Expression, builder *strings.Builder, args *[
 		e.Build(builder, args)
 		builder.WriteByte(')')
 	default:
-		builder.WriteByte('?')
+		builder.WriteString(p.model.dialect.Placeholder(p.model.index))
+		p.model.index++
 		*args = append(*args, expr)
 	}
 }
@@ -81,7 +84,8 @@ func (p *Predicate) Build(builder *strings.Builder, args *[]any) {
 			if val, ok := p.right.(*Value); ok {
 				if vals, ok := val.val.([]any); ok {
 					for i, v := range vals {
-						builder.WriteByte('?')
+						builder.WriteString(p.model.dialect.Placeholder(p.model.index))
+						p.model.index++
 						*args = append(*args, v)
 						if i < len(vals)-1 {
 							builder.WriteString(", ")
@@ -105,10 +109,12 @@ func (p *Predicate) Build(builder *strings.Builder, args *[]any) {
 			builder.WriteByte(' ')
 			if val, ok := p.right.(*Value); ok {
 				if vals, ok := val.val.([]any); ok && len(vals) == 2 {
-					builder.WriteByte('?')
+					builder.WriteString(p.model.dialect.Placeholder(p.model.index))
+					p.model.index++
 					*args = append(*args, vals[0])
 					builder.WriteString(" AND ")
-					builder.WriteByte('?')
+					builder.WriteString(p.model.dialect.Placeholder(p.model.index))
+					p.model.index++
 					*args = append(*args, vals[1])
 				}
 			}

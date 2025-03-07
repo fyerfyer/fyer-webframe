@@ -209,7 +209,7 @@ func TestInserter_Upsert(t *testing.T) {
 				Insert(nil, &testModel).
 				Upsert([]*Column{Col("ID"), Col("Name")}, []*Column{Col("ID"), Col("Name")}),
 			wantQuery: &Query{
-				SQL:  "INSERT INTO `test_model` (`id`, `name`, `job`) VALUES (?, ?, ?) ON CONFLICT(`id`, `name`) DO UPDATE SET id = EXCLUDED.id, name = EXCLUDED.name;",
+				SQL:  "INSERT INTO \"test_model\" (\"id\", \"name\", \"job\") VALUES (?, ?, ?) ON CONFLICT(\"id\", \"name\") DO UPDATE SET id = EXCLUDED.id, name = EXCLUDED.name;",
 				Args: []any{1, "Tom", sql.NullString{String: "Engineer", Valid: true}},
 			},
 		},

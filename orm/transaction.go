@@ -12,7 +12,13 @@ type Tx struct {
 }
 
 func (t *Tx) getModel(val any) (*model, error) {
-	return t.db.getModel(val)
+	m, err := t.db.getModel(val)
+	if err != nil {
+		return nil, err
+	}
+	// 确保从事务中获取的模型也设置了方言
+	m.SetDialect(t.db.dialect)
+	return m, nil
 }
 
 func (t *Tx) getDB() *DB {

@@ -3,16 +3,17 @@ package orm
 import (
 	"context"
 	"database/sql"
+
 	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 )
 
 // DB 是orm用来管理数据库连接和缓存之类持久化内容的结构体
 type DB struct {
-	model         *modelCache  // 元数据缓存
-	sqlDB         *sql.DB      // 数据库连接
-	dialect       Dialect      // 数据库方言
-	handler       Handler      // 处理器
-	middlewares   []Middleware // 中间件
+	model       *modelCache  // 元数据缓存
+	sqlDB       *sql.DB      // 数据库连接
+	dialect     Dialect      // 数据库方言
+	handler     Handler      // 处理器
+	middlewares []Middleware // 中间件
 }
 
 // queryContext 查询
@@ -29,7 +30,13 @@ type DBOption func(*DB) error
 
 // getModel 获取元数据
 func (db *DB) getModel(val any) (*model, error) {
-	return db.model.get(val)
+	m, err := db.model.get(val)
+	if err != nil {
+		return nil, err
+	}
+	// 设置方言
+	m.SetDialect(db.dialect)
+	return m, nil
 }
 
 // getDB 获取db对象

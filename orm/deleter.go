@@ -12,6 +12,7 @@ type Deleter[T any] struct {
 	model   *model
 	args    []any
 	layer   Layer
+	dialect Dialect
 }
 
 func RegisterDeleter[T any](layer Layer) *Deleter[T] {
@@ -33,16 +34,22 @@ func RegisterDeleter[T any](layer Layer) *Deleter[T] {
 		}
 	}
 
+	dialect := layer.getDB().dialect
+	m.dialect = dialect
+	m.index = 1
+
 	return &Deleter[T]{
 		builder: &strings.Builder{},
 		model:   m,
+		dialect: dialect,
 		layer:   layer,
 	}
 }
 
 func (d *Deleter[T]) Delete(cols ...Selectable) *Deleter[T] {
 	if cols == nil {
-		d.builder.WriteString("DELETE FROM " + "`" + d.model.table + "`")
+		d.builder.WriteString("DELETE FROM ")
+		d.builder.WriteString(d.dialect.Quote(d.model.table))
 		return d
 	}
 
@@ -72,7 +79,8 @@ func (d *Deleter[T]) Delete(cols ...Selectable) *Deleter[T] {
 		}
 	}
 
-	d.builder.WriteString("FROM " + "`" + d.model.table + "`")
+	d.builder.WriteString("FROM ")
+	d.builder.WriteString(d.dialect.Quote(d.model.table))
 	return d
 }
 
@@ -80,10 +88,7 @@ func (d *Deleter[T]) Where(conditions ...Condition) *Deleter[T] {
 	d.builder.WriteString(" WHERE ")
 	for i := 0; i < len(conditions); i++ {
 		if pred, ok := conditions[i].(*Predicate); ok {
-			if col, ok := pred.left.(*Column); ok {
-				// 注入模型信息
-				col.model = d.model
-			}
+			pred.model = d.model
 		}
 		conditions[i].Build(d.builder, &d.args)
 		if i != len(conditions)-1 {

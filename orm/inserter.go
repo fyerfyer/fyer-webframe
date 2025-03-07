@@ -9,9 +9,9 @@ import (
 
 type Inserter[T any] struct {
 	builder *strings.Builder
-	table   string
 	values  []any
 	model   *model
+	dialect Dialect
 	layer   Layer
 }
 
@@ -44,9 +44,14 @@ func RegisterInserter[T any](layer Layer) *Inserter[T] {
 		m.table = tablename.TableName()
 	}
 
+	dialect := layer.getDB().dialect
+	m.dialect = dialect
+	m.index = 1
+
 	return &Inserter[T]{
 		builder: &strings.Builder{},
 		model:   m,
+		dialect: dialect,
 		layer:   layer,
 	}
 }
@@ -58,7 +63,7 @@ func (i *Inserter[T]) Insert(cols []string, vals ...*T) *Inserter[T] {
 	}
 
 	i.builder.WriteString("INSERT INTO ")
-	i.builder.WriteString("`" + i.model.table + "` ")
+	i.builder.WriteString(i.dialect.Quote(i.model.table) + " ")
 
 	colsString := strings.Builder{}
 	placeholders := strings.Builder{}
@@ -87,8 +92,9 @@ func (i *Inserter[T]) Insert(cols []string, vals ...*T) *Inserter[T] {
 		if !ok {
 			panic(ferr.ErrInvalidColumn(fieldName))
 		}
-		colsString.WriteString("`" + col.colName + "`")
-		basePlaceHolders.WriteByte('?')
+		colsString.WriteString(i.dialect.Quote(col.colName))
+		basePlaceHolders.WriteString(i.dialect.Placeholder(i.model.index))
+		i.model.index ++
 		if idx != len(fields)-1 {
 			colsString.WriteString(", ")
 			basePlaceHolders.WriteString(", ")

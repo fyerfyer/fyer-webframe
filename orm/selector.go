@@ -16,8 +16,8 @@ var sqlWithFrom = ""
 
 type Selector[T any] struct {
 	builder       *strings.Builder
-	table         string
 	model         *model
+	dialect       Dialect
 	subqueryCache *map[string]map[string]bool // 子查询缓存，只需要查询列名是否存在即可
 	cols          []string                    // 查询列，用于构建子查询缓存
 	delayCols     []*Column                   // 延迟处理的子查询列
@@ -52,17 +52,23 @@ func RegisterSelector[T any](layer Layer) *Selector[T] {
 		m.table = tablename.TableName()
 	}
 
+	dialect := layer.getDB().dialect
+	m.dialect = dialect
+	m.index = 1
+
 	return &Selector[T]{
 		builder: &strings.Builder{},
 		model:   m,
 		layer:   layer,
+		dialect: dialect,
 	}
 }
 
 func (s *Selector[T]) Select(cols ...Selectable) *Selector[T] {
-	sqlWithFrom = "FROM " + "`" + s.model.table + "`"
+	sqlWithFrom = "FROM " + s.dialect.Quote(s.model.table)
 	if cols == nil {
-		s.builder.WriteString("SELECT * " + sqlWithFrom)
+		s.builder.WriteString("SELECT * ")
+		s.builder.WriteString(sqlWithFrom)
 		return s
 	}
 
@@ -147,7 +153,7 @@ func (s *Selector[T]) from(table TableReference) *Selector[T] {
 	case *Join:
 		table.Build(s.builder, &s.args)
 	case *Value:
-		s.builder.WriteString("`" + table.val.(string) + "`")
+		s.builder.WriteString(s.dialect.Quote(table.val.(string)))
 	}
 	return s
 }
@@ -460,7 +466,7 @@ func (s *Selector[T]) scanRow(rows *sql.Rows) (*T, error) {
 		//	}
 		//}
 
-		// No match, use a dummy variable
+		// 没找到匹配的列，返回一个dummy
 		var dummy any
 		vals[i] = &dummy
 	}

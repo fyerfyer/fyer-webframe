@@ -1,10 +1,11 @@
 package orm
 
 import (
-	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
-	"github.com/fyerfyer/fyer-webframe/orm/internal/utils"
 	"reflect"
 	"strings"
+
+	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
+	"github.com/fyerfyer/fyer-webframe/orm/internal/utils"
 )
 
 type model struct {
@@ -13,6 +14,8 @@ type model struct {
 	colNameMap    map[string]string
 	colAliasMap   map[string]bool
 	tableAliasMap map[string]string
+	dialect       Dialect // 添加dialect字段
+	index         int     // 用于postgresql的占位符
 }
 
 type field struct {
@@ -53,11 +56,12 @@ func parseModel(v any) (*model, error) {
 	}
 
 	return &model{
-		table:       utils.CamelToSnake(typ.Name()),
-		fieldsMap:   fields,
-		colNameMap:  colNameMap,
-		colAliasMap: make(map[string]bool, 4),
+		table:         utils.CamelToSnake(typ.Name()),
+		fieldsMap:     fields,
+		colNameMap:    colNameMap,
+		colAliasMap:   make(map[string]bool, 4),
 		tableAliasMap: make(map[string]string, 4),
+		dialect:       nil, // 初始为nil，将在后续设置
 	}, nil
 }
 
@@ -86,4 +90,9 @@ func parseTag(field reflect.StructField) (map[string]string, error) {
 	}
 
 	return tags, nil
+}
+
+// SetDialect 为模型设置方言
+func (m *model) SetDialect(dialect Dialect) {
+	m.dialect = dialect
 }

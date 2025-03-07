@@ -13,7 +13,20 @@ const (
 
 type Join struct {
 	JoinType string
-	Target TableReference
+	Target   TableReference
+	dialect  Dialect
+}
+
+func (j *Join) getDialect() Dialect {
+	if j.dialect != nil {
+		return j.dialect
+	}
+
+	return &Mysql{}
+}
+
+func (j *Join) SetDialect(dialect Dialect) {
+	j.dialect = dialect
 }
 
 func (j *Join) tableReference() string {
@@ -23,11 +36,24 @@ func (j *Join) tableReference() string {
 func (j *Join) Build(builder *strings.Builder, args *[]any) any {
 	builder.WriteString(" " + j.JoinType)
 	builder.WriteString(" ")
-    return j.Target.Build(builder, args)
+	return j.Target.Build(builder, args)
 }
 
 type Table_ struct {
-	name string
+	name    string
+	dialect Dialect
+}
+
+func (t *Table_) getDialect() Dialect {
+	if t.dialect != nil {
+		return t.dialect
+	}
+
+	return &Mysql{}
+}
+
+func (t *Table_) SetDialect(dialect Dialect) {
+	t.dialect = dialect
 }
 
 func (t *Table_) tableReference() string {
@@ -35,7 +61,8 @@ func (t *Table_) tableReference() string {
 }
 
 func (t *Table_) Build(builder *strings.Builder, args *[]any) any {
-	builder.WriteString("`" + t.name + "`")
+	dialect := t.getDialect()
+	builder.WriteString(dialect.Quote(t.name))
 	return nil
 }
 

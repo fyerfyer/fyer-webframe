@@ -14,7 +14,7 @@ type Aggregate struct {
 	model    *model
 }
 
-// 修改构造函数返回指针
+// Count 计算数量
 func Count(col string) *Aggregate {
 	return &Aggregate{
 		fn:  "COUNT",
@@ -73,6 +73,15 @@ func (a *Aggregate) As(alias string) *Aggregate {
 	}
 }
 
+// getDialect 获取当前模型对应的方言
+func (a *Aggregate) getDialect() Dialect {
+	if a.model != nil && a.model.dialect != nil {
+		return a.model.dialect
+	}
+	// 默认使用MySQL方言
+	return &Mysql{}
+}
+
 // Build 构建聚合函数
 // 这里有一个细节：对于传入的字符串，如果在模型中找到了它对应的数据库字段的话，就会自动选择使用这个字段
 // 否则就会将传入的字符串转换为蛇形命名法，然后使用这个字符串
@@ -82,6 +91,8 @@ func (a *Aggregate) Build(builder *strings.Builder) {
 		panic(ferr.ErrInvalidColumn(a.arg))
 	}
 
+	dialect := a.getDialect()
+
 	builder.WriteString(a.fn)
 	builder.WriteString("(")
 	if a.distinct {
@@ -89,20 +100,17 @@ func (a *Aggregate) Build(builder *strings.Builder) {
 	}
 	if a.arg == "" {
 		builder.WriteString("*")
-	}
-
-	if col, ok := a.model.fieldsMap[a.arg]; ok {
-		builder.WriteString("`" + col.colName + "`")
+	} else if col, ok := a.model.fieldsMap[a.arg]; ok {
+		builder.WriteString(dialect.Quote(col.colName))
 	} else {
-		builder.WriteString("`" + utils.CamelToSnake(a.arg) + "`")
+		builder.WriteString(dialect.Quote(utils.CamelToSnake(a.arg)))
 	}
 
 	builder.WriteString(")")
 	if a.alias != "" {
 		a.model.colAliasMap[a.alias] = true
-		builder.WriteString(" AS `")
-		builder.WriteString(a.alias)
-		builder.WriteString("`")
+		builder.WriteString(" AS ")
+		builder.WriteString(dialect.Quote(a.alias))
 	}
 }
 
