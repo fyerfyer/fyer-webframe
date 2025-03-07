@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/fyerfyer/fyer-kit/pool"
 	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
 )
 
@@ -14,14 +15,53 @@ type DB struct {
 	dialect     Dialect      // 数据库方言
 	handler     Handler      // 处理器
 	middlewares []Middleware // 中间件
+
+	// 连接池相关
+	pooledDB    *PooledDB    // 连接池封装
 }
 
 // queryContext 查询
 func (db *DB) queryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+	if db.pooledDB != nil && db.pooledDB.IsPooled() {
+		// 从池中获取连接
+		sqlConn, conn, err := db.pooledDB.GetConn(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		// 执行查询
+		rows, err := sqlConn.QueryContext(ctx, query, args...)
+
+		// 查询执行后直接归还连接
+		db.pooledDB.PutConn(conn, err)
+
+		if err != nil {
+			return nil, err
+		}
+
+		return rows, nil
+	}
+
 	return db.sqlDB.QueryContext(ctx, query, args...)
 }
 
 func (db *DB) execContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	if db.pooledDB != nil && db.pooledDB.IsPooled() {
+		// 从池中获取连接
+		sqlConn, conn, err := db.pooledDB.GetConn(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		// 执行命令
+		result, err := sqlConn.ExecContext(ctx, query, args...)
+
+		// 归还连接
+		db.pooledDB.PutConn(conn, err)
+
+		return result, err
+	}
+
 	return db.sqlDB.ExecContext(ctx, query, args...)
 }
 
@@ -80,8 +120,38 @@ func OpenDB(driver, dsn string, dialectName string, opts ...DBOption) (*DB, erro
 	return Open(sqlDB, dialectName, opts...)
 }
 
+// Close 关闭数据库连接
+func (db *DB) Close() error {
+	if db.pooledDB != nil && db.pooledDB.IsPooled() {
+		return db.pooledDB.Close()
+	}
+	return db.sqlDB.Close()
+}
+
 // BeginTx 开启事务
 func (db *DB) BeginTx(ctx context.Context, opt *sql.TxOptions) (*Tx, error) {
+	if db.pooledDB != nil && db.pooledDB.IsPooled() {
+		// 从池中获取专用连接
+		sqlConn, conn, err := db.pooledDB.GetConn(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		// 在此连接上开启事务
+		tx, err := sqlConn.BeginTx(ctx, opt)
+		if err != nil {
+			db.pooledDB.PutConn(conn, err)
+			return nil, err
+		}
+
+		// 返回包含连接的事务
+		return &Tx{
+			db:       db,
+			tx:       tx,
+			poolConn: conn,
+		}, nil
+	}
+
 	tx, err := db.sqlDB.BeginTx(ctx, opt)
 	if err != nil {
 		return nil, err
@@ -126,4 +196,26 @@ func (db *DB) getHandler() Handler {
 
 func (db *DB) HandleQuery(ctx context.Context, qc *QueryContext) (*QueryResult, error) {
 	return db.handler.QueryHandler(ctx, qc)
+}
+
+// PoolStats 返回连接池统计信息
+func (db *DB) PoolStats() pool.Stats {
+	if db.pooledDB != nil && db.pooledDB.IsPooled() {
+		return db.pooledDB.Stats()
+	}
+	return pool.Stats{}
+}
+
+// 实现 Layer 接口的连接池相关方法
+func (db *DB) getConn(ctx context.Context) (*sql.DB, pool.Connection, error) {
+	if db.pooledDB != nil && db.pooledDB.IsPooled() {
+		return db.pooledDB.GetConn(ctx)
+	}
+	return db.sqlDB, nil, nil
+}
+
+func (db *DB) putConn(conn pool.Connection, err error) {
+	if db.pooledDB != nil && db.pooledDB.IsPooled() {
+		db.pooledDB.PutConn(conn, err)
+	}
 }

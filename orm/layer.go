@@ -3,6 +3,8 @@ package orm
 import (
 	"context"
 	"database/sql"
+
+	"github.com/fyerfyer/fyer-kit/pool"
 )
 
 // Layer 用于将db和tx固结在一起
@@ -20,6 +22,11 @@ type Layer interface {
 	getHandler() Handler
 	HandleQuery(ctx context.Context, qc *QueryContext) (*QueryResult, error)
 
-	queryContext (ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
-	execContext (ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	// 数据库操作相关方法
+	queryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+	execContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+
+	// 连接池相关方法
+	getConn(ctx context.Context) (*sql.DB, pool.Connection, error)
+	putConn(conn pool.Connection, err error)
 }
