@@ -34,12 +34,7 @@ func (db *DB) queryContext(ctx context.Context, query string, args ...interface{
 
 		// 查询执行后直接归还连接
 		db.pooledDB.PutConn(conn, err)
-
-		if err != nil {
-			return nil, err
-		}
-
-		return rows, nil
+		return rows, err
 	}
 
 	return db.sqlDB.QueryContext(ctx, query, args...)
@@ -58,7 +53,6 @@ func (db *DB) execContext(ctx context.Context, query string, args ...interface{}
 
 		// 归还连接
 		db.pooledDB.PutConn(conn, err)
-
 		return result, err
 	}
 
@@ -174,12 +168,16 @@ func (db *DB) Tx(ctx context.Context, fn func(tx *Tx) error, opt *sql.TxOptions)
 	panicked := true
 	defer func() {
 		if panicked || err != nil {
-			err = tx.RollBack()
+			tx.RollBack()
 		}
-		err = tx.Commit()
 	}()
 
 	err = fn(tx)
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit()
 	panicked = false
 	return err
 }
@@ -218,4 +216,9 @@ func (db *DB) putConn(conn pool.Connection, err error) {
 	if db.pooledDB != nil && db.pooledDB.IsPooled() {
 		db.pooledDB.PutConn(conn, err)
 	}
+}
+
+// NewClient 创建一个封装的ORM客户端
+func (db *DB) NewClient() *Client {
+	return New(db)
 }
