@@ -5,6 +5,7 @@ type FindOptions struct {
 	Offset  int
 	Limit   int
 	OrderBy []OrderBy
+	shardKeys map[string]interface{} // 用于存储分片键
 }
 
 // FindOption 是FindOptions的构建器选项

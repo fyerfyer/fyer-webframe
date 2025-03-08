@@ -72,13 +72,6 @@ func TestMiddleware(t *testing.T) {
 	assert.Equal(t, expected, order)
 }
 
-// HandlerFunc 用于将函数转换为 Handler 接口
-type HandlerFunc func(ctx context.Context, qc *QueryContext) (*QueryResult, error)
-
-func (h HandlerFunc) QueryHandler(ctx context.Context, qc *QueryContext) (*QueryResult, error) {
-	return h(ctx, qc)
-}
-
 // TestMiddlewareChain 测试中间件链的构建
 func TestMiddlewareChain(t *testing.T) {
 	mockDB, _, err := sqlmock.New()

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 )
 
 // Client 是对底层ORM框架的简洁封装，提供更方便的CRUD操作
@@ -61,11 +62,6 @@ func (c *Client) Transaction(ctx context.Context, fn func(tc *Client) error) err
 func (c *Client) Close() error {
 	return c.db.Close()
 }
-
-// CreateSchema 创建模式（表）
-//func (c *Client) CreateSchema(ctx context.Context, model interface{}) error {
-//	return nil
-//}
 
 // Raw 执行原始SQL查询
 func (c *Client) Raw(ctx context.Context, sql string, args ...interface{}) (*sql.Rows, error) {
@@ -148,4 +144,153 @@ func (c *Client) GetRegisteredModel(name string) (interface{}, bool) {
 // 这个方法为高级用户提供直接访问底层ORM的能力
 func (c *Client) GetDB() *DB {
 	return c.db
+}
+
+//=================== 分片相关接口 ===================
+
+// ShardingClient 是支持分片功能的客户端
+type ShardingClient struct {
+	*Client
+	shardingManager *ShardingManager
+}
+
+// NewShardingClient 创建一个支持分片的客户端
+func NewShardingClient(db *DB) *ShardingClient {
+	if !db.IsSharded() || db.shardingManager == nil {
+		// 自动启用分片
+		db.EnableSharding(NewShardingManager(db, NewShardingRouter()))
+	}
+
+	return &ShardingClient{
+		Client:          New(db),
+		shardingManager: db.shardingManager,
+	}
+}
+
+// ShardedCollection 获取支持分片的集合
+func (c *ShardingClient) ShardedCollection(modelType interface{}) *ShardedCollection {
+	modelName := getModelName(modelType)
+	return &ShardedCollection{
+		modelType:       modelType,
+		modelName:       modelName,
+		shardingManager: c.shardingManager,
+	}
+}
+
+// RegisterShardStrategy 注册分片策略
+func (c *ShardingClient) RegisterShardStrategy(modelName string, strategy ShardingStrategy, defaultDBName string) {
+	c.shardingManager.RegisterModelInfo(modelName, strategy, defaultDBName)
+}
+
+// RouteWithKey 根据分片键值路由请求到正确的分片
+func (c *ShardingClient) RouteWithKey(ctx context.Context, modelName string, shardKey string, shardValue interface{}) (*DB, string, error) {
+	return c.shardingManager.RouteWithKey(ctx, modelName, shardKey, shardValue)
+}
+
+// ExecuteOnShard 在指定分片上执行操作
+func (c *ShardingClient) ExecuteOnShard(ctx context.Context, shardName string, fn func(db *DB) error) error {
+	db, ok := c.shardingManager.GetShard(shardName)
+	if !ok {
+		return fmt.Errorf("shard %s not found", shardName)
+	}
+
+	return fn(db)
+}
+
+// ExecuteOnAllShards 在所有分片上执行操作
+func (c *ShardingClient) ExecuteOnAllShards(ctx context.Context, fn func(db *DB) error) []error {
+	var errors []error
+
+	c.shardingManager.mu.RLock()
+	shards := make(map[string]*DB)
+	for name, db := range c.shardingManager.shards {
+		shards[name] = db
+	}
+	c.shardingManager.mu.RUnlock()
+
+	// 并发执行
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for name, db := range shards {
+		wg.Add(1)
+		go func(name string, db *DB) {
+			defer wg.Done()
+
+			err := fn(db)
+			if err != nil {
+				mu.Lock()
+				errors = append(errors, fmt.Errorf("shard %s: %w", name, err))
+				mu.Unlock()
+			}
+		}(name, db)
+	}
+
+	// 等待所有操作完成
+	wg.Wait()
+
+	return errors
+}
+
+// WithShardKey 创建一个带有分片键信息的查询上下文
+func (c *ShardingClient) WithShardKey(modelName string, shardKey string, shardValue interface{}) *ShardingQueryContext {
+	return &ShardingQueryContext{
+		client:     c,
+		modelName:  modelName,
+		shardKey:   shardKey,
+		shardValue: shardValue,
+	}
+}
+
+// ShardingQueryContext 包含分片查询的上下文信息
+type ShardingQueryContext struct {
+	client     *ShardingClient
+	modelName  string
+	shardKey   string
+	shardValue interface{}
+}
+
+// Collection 获取指定模型的集合，带有分片路由信息
+func (sqc *ShardingQueryContext) Collection(modelType interface{}) *Collection {
+	db, tableName, err := sqc.client.RouteWithKey(context.Background(), sqc.modelName, sqc.shardKey, sqc.shardValue)
+	if err != nil {
+		// 如果路由失败，使用默认数据库
+		db = sqc.client.shardingManager.GetDefaultDB()
+	}
+
+	// 创建一个基于特定分片的客户端
+	shardClient := New(db)
+
+	coll := shardClient.Collection(modelType)
+
+	// 如果需要重写表名
+	if tableName != "" && tableName != coll.modelName {
+		// 这里可以添加表名重写逻辑
+	}
+
+	return coll
+}
+
+// Exec 执行原始SQL命令，会自动路由到正确的分片
+func (sqc *ShardingQueryContext) Exec(ctx context.Context, sql string, args ...interface{}) (Result, error) {
+	db, _, err := sqc.client.RouteWithKey(ctx, sqc.modelName, sqc.shardKey, sqc.shardValue)
+	if err != nil {
+		// 如果路由失败，使用默认数据库
+		db = sqc.client.shardingManager.GetDefaultDB()
+	}
+
+	shardClient := New(db)
+	return shardClient.Exec(ctx, sql, args...)
+}
+
+// Raw 执行原始SQL查询，会自动路由到正确的分片
+func (sqc *ShardingQueryContext) Raw(ctx context.Context, sql string, args ...interface{}) (*sql.Rows, error) {
+	db, _, err := sqc.client.RouteWithKey(ctx, sqc.modelName, sqc.shardKey, sqc.shardValue)
+	if err != nil {
+		// 如果路由失败，使用默认数据库
+		db = sqc.client.shardingManager.GetDefaultDB()
+	}
+
+	shardClient := New(db)
+	return shardClient.Raw(ctx, sql, args...)
 }
