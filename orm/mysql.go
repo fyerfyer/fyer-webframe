@@ -3,6 +3,8 @@ package orm
 import (
 	"errors"
 	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
+	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -72,18 +74,109 @@ func (m Mysql) DateFormat(dateExpr string, format string) string {
 	return "DATE_FORMAT(" + dateExpr + ", '" + format + "')"
 }
 
-// LimitOffset MySQL的LIMIT和OFFSET语法
-//func (m Mysql) LimitOffset(limit int, offset int) string {
-//	if limit > 0 && offset < 0 {
-//		return "LIMIT " + strconv.Itoa(limit)
-//	} else if limit < 0 && offset > 0 {
-//		return "OFFSET " + strconv.Itoa(offset)
-//	} else if limit > 0 && offset > 0 {
-//		return "LIMIT " + strconv.Itoa(limit) + " OFFSET " + strconv.Itoa(offset)
-//	}
-//
-//	return ""
-//}
+// CreateTableSQL 为MySQL生成建表语句
+func (m Mysql) CreateTableSQL(model *model) string {
+	// 先调用基本实现生成通用的SQL
+	baseSQL := m.BaseDialect.CreateTableSQL(model)
+
+	// 添加MySQL特有的表选项
+	return baseSQL + " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+}
+
+// AlterTableSQL 实现MySQL特定的表结构修改语句
+func (m Mysql) AlterTableSQL(model *model, existingTable *model) string {
+	// 调用基本实现
+	return m.BaseDialect.AlterTableSQL(model, existingTable)
+}
+
+// TableExistsSQL 实现MySQL检查表是否存在的SQL
+func (m Mysql) TableExistsSQL(schema, table string) string {
+	if schema == "" {
+		return "SELECT 1 FROM information_schema.tables WHERE table_name = '" + table + "'"
+	}
+	return "SELECT 1 FROM information_schema.tables WHERE table_schema = '" + schema + "' AND table_name = '" + table + "'"
+}
+
+// ColumnType 为MySQL实现Go类型到SQL类型的映射
+func (m Mysql) ColumnType(f *field) string {
+	// 如果字段明确指定了SQL类型，直接使用
+	if f.sqlType != "" {
+		return f.sqlType
+	}
+
+	// 根据Go类型映射MySQL类型
+	switch f.typ.Kind() {
+	case reflect.Bool:
+		return "TINYINT(1)"
+	case reflect.Int, reflect.Int32:
+		if f.autoIncr {
+			return "INT AUTO_INCREMENT"
+		}
+		return "INT"
+	case reflect.Int8:
+		return "TINYINT"
+	case reflect.Int16:
+		return "SMALLINT"
+	case reflect.Int64:
+		if f.autoIncr {
+			return "BIGINT AUTO_INCREMENT"
+		}
+		return "BIGINT"
+	case reflect.Uint, reflect.Uint32:
+		return "INT UNSIGNED"
+	case reflect.Uint8:
+		return "TINYINT UNSIGNED"
+	case reflect.Uint16:
+		return "SMALLINT UNSIGNED"
+	case reflect.Uint64:
+		return "BIGINT UNSIGNED"
+	case reflect.Float32:
+		return "FLOAT"
+	case reflect.Float64:
+		if f.precision > 0 {
+			return "DECIMAL(" + strconv.Itoa(f.precision) + "," + strconv.Itoa(f.scale) + ")"
+		}
+		return "DOUBLE"
+	case reflect.String:
+		if f.size > 0 {
+			if f.size > 16383 {
+				return "TEXT"
+			}
+			return "VARCHAR(" + strconv.Itoa(f.size) + ")"
+		}
+		return "TEXT"
+	}
+
+	// 处理特殊类型
+	typeName := f.typ.String()
+
+	// 处理sql.NullXXX类型
+	if strings.HasPrefix(typeName, "sql.Null") {
+		switch typeName {
+		case "sql.NullString":
+			if f.size > 0 {
+				if f.size > 16383 {
+					return "TEXT"
+				}
+				return "VARCHAR(" + strconv.Itoa(f.size) + ")"
+			}
+			return "TEXT"
+		case "sql.NullInt64":
+			return "BIGINT"
+		case "sql.NullFloat64":
+			return "DOUBLE"
+		case "sql.NullBool":
+			return "TINYINT(1)"
+		case "sql.NullTime":
+			return "DATETIME"
+		}
+	} else if typeName == "time.Time" {
+		return "DATETIME"
+	}
+
+	// 默认类型
+	return "TEXT"
+}
 
 func init() {
 	RegisterDialect("mysql", &Mysql{})

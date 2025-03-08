@@ -17,23 +17,27 @@ type DB struct {
 	middlewares []Middleware // 中间件
 
 	// 连接池相关
-	pooledDB    *PooledDB    // 连接池封装
+	pooledDB *PooledDB // 连接池封装
+
+	// 自动迁移相关
+	schemaManager *SchemaManager // 架构管理器
 }
 
 // queryContext 查询
 func (db *DB) queryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
 	if db.pooledDB != nil && db.pooledDB.IsPooled() {
 		// 从池中获取连接
-		sqlConn, conn, err := db.pooledDB.GetConn(ctx)
+		sqlDB, conn, err := db.pooledDB.GetConn(ctx)
 		if err != nil {
 			return nil, err
 		}
 
 		// 执行查询
-		rows, err := sqlConn.QueryContext(ctx, query, args...)
+		rows, err := sqlDB.QueryContext(ctx, query, args...)
 
 		// 查询执行后直接归还连接
 		db.pooledDB.PutConn(conn, err)
+
 		return rows, err
 	}
 
@@ -43,17 +47,18 @@ func (db *DB) queryContext(ctx context.Context, query string, args ...interface{
 func (db *DB) execContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
 	if db.pooledDB != nil && db.pooledDB.IsPooled() {
 		// 从池中获取连接
-		sqlConn, conn, err := db.pooledDB.GetConn(ctx)
+		sqlDB, conn, err := db.pooledDB.GetConn(ctx)
 		if err != nil {
 			return nil, err
 		}
 
 		// 执行命令
-		result, err := sqlConn.ExecContext(ctx, query, args...)
+		res, err := sqlDB.ExecContext(ctx, query, args...)
 
 		// 归还连接
 		db.pooledDB.PutConn(conn, err)
-		return result, err
+
+		return res, err
 	}
 
 	return db.sqlDB.ExecContext(ctx, query, args...)
@@ -94,6 +99,9 @@ func Open(db *sql.DB, dialectName string, opts ...DBOption) (*DB, error) {
 	// 初始化核心处理器
 	d.handler = &CoreHandler{db: d}
 
+	// 初始化Schema管理器
+	d.schemaManager = NewSchemaManager(d)
+
 	// 应用配置项
 	for _, opt := range opts {
 		if err := opt(d); err != nil {
@@ -126,13 +134,13 @@ func (db *DB) Close() error {
 func (db *DB) BeginTx(ctx context.Context, opt *sql.TxOptions) (*Tx, error) {
 	if db.pooledDB != nil && db.pooledDB.IsPooled() {
 		// 从池中获取专用连接
-		sqlConn, conn, err := db.pooledDB.GetConn(ctx)
+		sqlDB, conn, err := db.pooledDB.GetConn(ctx)
 		if err != nil {
 			return nil, err
 		}
 
 		// 在此连接上开启事务
-		tx, err := sqlConn.BeginTx(ctx, opt)
+		tx, err := sqlDB.BeginTx(ctx, opt)
 		if err != nil {
 			db.pooledDB.PutConn(conn, err)
 			return nil, err
@@ -168,7 +176,7 @@ func (db *DB) Tx(ctx context.Context, fn func(tx *Tx) error, opt *sql.TxOptions)
 	panicked := true
 	defer func() {
 		if panicked || err != nil {
-			tx.RollBack()
+			_ = tx.RollBack()
 		}
 	}()
 
@@ -221,4 +229,64 @@ func (db *DB) putConn(conn pool.Connection, err error) {
 // NewClient 创建一个封装的ORM客户端
 func (db *DB) NewClient() *Client {
 	return New(db)
+}
+
+// ======== 自动迁移相关接口 ========
+
+// AutoMigrate 自动迁移模型到数据库
+// 依次将传入的模型在数据库中创建表或更新表结构
+func (db *DB) AutoMigrate(ctx context.Context, models ...interface{}) error {
+	for _, model := range models {
+		if err := db.schemaManager.MigrateModel(ctx, model); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AutoMigrateWithOptions 自动迁移模型到数据库，支持选项
+func (db *DB) AutoMigrateWithOptions(ctx context.Context, opts []MigrateOption, models ...interface{}) error {
+	for _, model := range models {
+		if err := db.schemaManager.MigrateModel(ctx, model, opts...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MigrateModel 迁移单个模型
+func (db *DB) MigrateModel(ctx context.Context, model interface{}, opts ...MigrateOption) error {
+	return db.schemaManager.MigrateModel(ctx, model, opts...)
+}
+
+// RegisterModel 注册模型的同时提供自动迁移选项
+func (db *DB) RegisterModel(name string, model interface{}, autoMigrate bool, opts ...MigrateOption) error {
+	// 注册模型
+	Register(name, model)
+
+	// 如果需要自动迁移
+	if autoMigrate {
+		return db.schemaManager.MigrateModel(context.Background(), model, opts...)
+	}
+
+	return nil
+}
+
+// RegisterModels 同时注册多个模型
+func (db *DB) RegisterModels(autoMigrate bool, models map[string]interface{}) error {
+	for name, model := range models {
+		if err := db.RegisterModel(name, model, autoMigrate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MigrateOptions 返回当前DB的迁移选项
+func (db *DB) MigrateOptions() *MigrateOptions {
+	options := &MigrateOptions{
+		Strategy: AlterIfNeeded,
+		CreateMigrationLog: true,
+	}
+	return options
 }
