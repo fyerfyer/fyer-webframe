@@ -30,8 +30,8 @@ func (c *Client) Collection(modelType interface{}) *Collection {
 
 // getModelName 获取模型名称
 func getModelName(model interface{}) string {
-	if namer, ok := model.(interface{ TableNamer() string }); ok {
-		return namer.TableNamer()
+	if namer, ok := model.(interface{ TableName() string }); ok {
+		return namer.TableName()
 	}
 
 	t := reflect.TypeOf(model)

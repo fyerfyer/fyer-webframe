@@ -494,3 +494,189 @@ func TestClient_Raw(t *testing.T) {
 	// 验证所有预期的SQL语句都已执行
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestClient_CollectionWithTableNameInterface(t *testing.T) {
+	// 创建 mock 数据库和连接
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// 创建 ORM DB 实例
+	db, err := Open(mockDB, "mysql")
+	require.NoError(t, err)
+	defer db.Close()
+
+	// 创建客户端实例
+	client := New(db)
+
+	// 创建一个实现了 TableName 接口的测试模型的集合
+	collection := client.Collection(&TestModelWithTableNameInterface{})
+	assert.NotNil(t, collection)
+
+	// 验证正确使用了自定义表名，而不是根据结构体名称生成的表名
+	assert.Equal(t, "test_model", collection.modelName)
+}
+
+func TestClient_CollectionWithTableNameInterfacePtr(t *testing.T) {
+	// 创建 mock 数据库和连接
+	mockDB, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// 创建 ORM DB 实例
+	db, err := Open(mockDB, "mysql")
+	require.NoError(t, err)
+	defer db.Close()
+
+	// 创建客户端实例
+	client := New(db)
+
+	// 创建一个实现了 TableName 接口的测试模型的集合
+	collection := client.Collection(&TestModelWithTableNameInterfacePtr{})
+	assert.NotNil(t, collection)
+
+	// 验证正确使用了自定义表名，而不是根据结构体名称生成的表名
+	assert.Equal(t, "test_model", collection.modelName)
+}
+
+func TestCollection_FindWithTag(t *testing.T) {
+	// 创建 mock 数据库和连接
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// 设置预期查询 - 注意这里使用了标签中定义的列名 testid 和 testname
+	mock.ExpectQuery("SELECT \\* FROM `test_model_with_tag` WHERE `testid` = \\?").
+		WithArgs(1).
+		WillReturnRows(sqlmock.NewRows([]string{"testid", "testname", "job"}).
+			AddRow(1, "Tagged User", sql.NullString{String: "Developer", Valid: true}))
+
+	// 创建 ORM DB 实例
+	db, err := Open(mockDB, "mysql")
+	require.NoError(t, err)
+	defer db.Close()
+
+	// 创建客户端实例
+	client := New(db)
+
+	// 创建一个带标签的测试模型的集合
+	collection := client.Collection(&TestModelWithTag{})
+
+	// 执行查找操作 - 使用原始字段名
+	result, err := collection.Find(context.Background(), Col("ID").Eq(1))
+	require.NoError(t, err)
+
+	// 验证结果
+	testModel, ok := result.(*TestModelWithTag)
+	require.True(t, ok)
+	assert.Equal(t, 1, testModel.ID)
+	assert.Equal(t, "Tagged User", testModel.Name)
+	assert.Equal(t, "Developer", testModel.Job.String)
+	assert.True(t, testModel.Job.Valid)
+
+	// 验证所有预期的SQL语句都已执行
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCollection_UpdateWithTag(t *testing.T) {
+	// 创建 mock 数据库和连接
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// 设置预期查询 - 注意这里使用了标签中定义的列名 testid 和 testname
+	mock.ExpectExec("UPDATE `test_model_with_tag` SET `testname` = \\? WHERE `testid` = \\?").
+		WithArgs("Updated Tagged User", 1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	// 创建 ORM DB 实例
+	db, err := Open(mockDB, "mysql")
+	require.NoError(t, err)
+	defer db.Close()
+
+	// 创建客户端实例
+	client := New(db)
+
+	// 创建一个带标签的测试模型的集合
+	collection := client.Collection(&TestModelWithTag{})
+
+	// 准备更新数据 - 使用原始字段名
+	updates := map[string]interface{}{
+		"Name": "Updated Tagged User",
+	}
+
+	// 执行更新操作
+	result, err := collection.Update(context.Background(), updates, Col("ID").Eq(1))
+	require.NoError(t, err)
+
+	// 验证受影响的行数
+	rowsAffected, err := result.RowsAffected()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), rowsAffected)
+
+	// 验证所有预期的SQL语句都已执行
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCollection_DeleteWithTag(t *testing.T) {
+	// 创建 mock 数据库和连接
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// 设置预期查询 - 注意这里使用了标签中定义的列名 testid
+	mock.ExpectExec("DELETE FROM `test_model_with_tag` WHERE `testid` = \\?").
+		WithArgs(1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	// 创建 ORM DB 实例
+	db, err := Open(mockDB, "mysql")
+	require.NoError(t, err)
+	defer db.Close()
+
+	// 创建客户端实例
+	client := New(db)
+
+	// 创建一个带标签的测试模型的集合
+	collection := client.Collection(&TestModelWithTag{})
+
+	// 执行删除操作 - 使用原始字段名
+	result, err := collection.Delete(context.Background(), Col("ID").Eq(1))
+	require.NoError(t, err)
+
+	// 验证受影响的行数
+	rowsAffected, err := result.RowsAffected()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), rowsAffected)
+
+	// 验证所有预期的SQL语句都已执行
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestClient_CountWithTag(t *testing.T) {
+	// 创建 mock 数据库和连接
+	mockDB, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer mockDB.Close()
+
+	// 设置预期查询 - 注意这里使用了标签中定义的列名 testid
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM `test_model_with_tag` WHERE `testid` > \\?").
+		WithArgs(0).
+		WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(5))
+
+	// 创建 ORM DB 实例
+	db, err := Open(mockDB, "mysql")
+	require.NoError(t, err)
+	defer db.Close()
+
+	// 创建客户端实例
+	client := New(db)
+
+	// 执行计数查询
+	count, err := client.Count(context.Background(), &TestModelWithTag{}, Col("ID").Gt(0))
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), count)
+
+	// 验证所有预期的SQL语句都已执行
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
