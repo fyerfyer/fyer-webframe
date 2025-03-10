@@ -20,6 +20,7 @@ type DB struct {
 	schemaManager   *SchemaManager   // 架构管理器
 	shardingManager *ShardingManager // 分片管理器
 	isSharded       bool             // 是否启用分片
+	cacheManager    *CacheManager    // 缓存管理器
 }
 
 // queryContext 查询
@@ -123,21 +124,38 @@ func OpenDB(driver, dsn string, dialectName string, opts ...DBOption) (*DB, erro
 
 // Close 关闭数据库连接
 func (db *DB) Close() error {
+	var errs []error
+
 	// 如果启用了分片，先关闭所有分片连接
 	if db.isSharded && db.shardingManager != nil {
 		if err := db.shardingManager.Close(); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
 
 	// 如果启用了连接池，关闭连接池
-	if db.pooledDB != nil {
+	if db.pooledDB != nil && db.pooledDB.IsPooled() {
 		if err := db.pooledDB.Close(); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
 
-	return db.sqlDB.Close()
+	// 如果启用了缓存，清空缓存
+	if db.cacheManager != nil && db.cacheManager.IsEnabled() && db.cacheManager.cache != nil {
+		// 添加空指针检查
+		if err := db.cacheManager.cache.Clear(context.Background()); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	// 默认情况，直接关闭 sqlDB
+	if db.sqlDB != nil {
+		if err := db.sqlDB.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 // BeginTx 开启事务
@@ -254,6 +272,51 @@ func (db *DB) putConn(conn pool.Connection, err error) {
 // NewClient 创建一个封装的ORM客户端
 func (db *DB) NewClient() *Client {
 	return New(db)
+}
+
+// ======== 缓存相关接口 ========
+
+// GetCacheManager 获取缓存管理器
+func (db *DB) GetCacheManager() *CacheManager {
+	return db.cacheManager
+}
+
+// SetCacheManager 设置缓存管理器
+func (db *DB) SetCacheManager(cm *CacheManager) {
+	db.cacheManager = cm
+}
+
+// SetModelCacheConfig 为特定模型设置缓存配置
+func (db *DB) SetModelCacheConfig(modelName string, config *ModelCacheConfig) {
+	if db.cacheManager == nil {
+		// 如果还没有缓存管理器，创建一个默认的
+		db.cacheManager = NewCacheManager(nil) // 暂时没有具体缓存实现
+	}
+	db.cacheManager.SetModelCacheConfig(modelName, config)
+}
+
+// InvalidateCache 使缓存失效
+func (db *DB) InvalidateCache(ctx context.Context, modelName string, tags ...string) error {
+	if db.cacheManager == nil || !db.cacheManager.IsEnabled() {
+		return ErrCacheDisabled
+	}
+	return db.cacheManager.InvalidateCache(ctx, modelName, tags...)
+}
+
+// WithCache 在查询中使用缓存
+func (db *DB) WithCache() *DB {
+	if db.cacheManager != nil {
+		db.cacheManager.Enable()
+	}
+	return db
+}
+
+// WithoutCache 在查询中不使用缓存
+func (db *DB) WithoutCache() *DB {
+	if db.cacheManager != nil {
+		db.cacheManager.Disable()
+	}
+	return db
 }
 
 // ======== 自动迁移相关接口 ========

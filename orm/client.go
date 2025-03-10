@@ -146,6 +146,36 @@ func (c *Client) GetDB() *DB {
 	return c.db
 }
 
+// WithCache 启用缓存，返回具有缓存功能的客户端
+func (c *Client) WithCache() *Client {
+	if c.db.cacheManager != nil {
+		c.db.cacheManager.Enable()
+	}
+	return c
+}
+
+// WithoutCache 禁用缓存，返回禁用缓存的客户端
+func (c *Client) WithoutCache() *Client {
+	if c.db.cacheManager != nil {
+		c.db.cacheManager.Disable()
+	}
+	return c
+}
+
+// InvalidateCache 使指定模型的缓存失效
+func (c *Client) InvalidateCache(ctx context.Context, modelName string, tags ...string) error {
+	if c.db.cacheManager == nil || !c.db.cacheManager.IsEnabled() {
+		return ErrCacheDisabled
+	}
+	return c.db.InvalidateCache(ctx, modelName, tags...)
+}
+
+// SetModelCacheConfig 为特定模型设置缓存配置
+func (c *Client) SetModelCacheConfig(modelName string, config *ModelCacheConfig) {
+	c.db.SetModelCacheConfig(modelName, config)
+}
+
+
 //=================== 分片相关接口 ===================
 
 // ShardingClient 是支持分片功能的客户端

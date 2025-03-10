@@ -13,6 +13,23 @@ type Inserter[T any] struct {
 	model   *model
 	dialect Dialect
 	layer   Layer
+
+	// 缓存相关字段
+	invalidateCache bool     // 是否使缓存失效
+	invalidateTags  []string // 要失效的缓存标签
+}
+
+// WithInvalidateCache 设置是否使相关缓存失效
+func (i *Inserter[T]) WithInvalidateCache() *Inserter[T] {
+	i.invalidateCache = true
+	return i
+}
+
+// WithInvalidateTags 设置要使失效的缓存标签
+func (i *Inserter[T]) WithInvalidateTags(tags ...string) *Inserter[T] {
+	i.invalidateCache = true
+	i.invalidateTags = tags
+	return i
 }
 
 func RegisterInserter[T any](layer Layer) *Inserter[T] {
@@ -150,6 +167,7 @@ func (i *Inserter[T]) Build() (*Query, error) {
 	}, nil
 }
 
+// Exec 添加了缓存失效逻辑
 func (i *Inserter[T]) Exec(ctx context.Context) (Result, error) {
 	q, err := i.Build()
 	if err != nil {
@@ -164,6 +182,17 @@ func (i *Inserter[T]) Exec(ctx context.Context) (Result, error) {
 	}
 
 	res, err := i.layer.HandleQuery(ctx, qc)
+
+	// 如果执行成功且需要使缓存失效
+	if err == nil && i.invalidateCache {
+		db := i.layer.getDB()
+		if db.cacheManager != nil && db.cacheManager.IsEnabled() {
+			modelName := i.model.GetTableName()
+			// 传入标签或使用模型的默认标签
+			_ = db.cacheManager.InvalidateCache(ctx, modelName, i.invalidateTags...)
+		}
+	}
+
 	return Result{
 		res: res.Result.res,
 		err: err,

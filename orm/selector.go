@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/fyerfyer/fyer-webframe/orm/internal/ferr"
@@ -23,6 +24,37 @@ type Selector[T any] struct {
 	delayCols     []*Column                   // 延迟处理的子查询列
 	args          []any
 	layer         Layer
+
+	// 缓存相关字段
+	useCache  bool          // 是否使用缓存
+	cacheTTL  time.Duration // 缓存过期时间
+	cacheTags []string      // 缓存标签
+}
+
+// WithCache 启用缓存
+func (s *Selector[T]) WithCache() *Selector[T] {
+	s.useCache = true
+	return s
+}
+
+// WithoutSelectorCache 禁用缓存
+func (s *Selector[T]) WithoutSelectorCache() *Selector[T] {
+	s.useCache = false
+	return s
+}
+
+// WithSelectorCacheTTL 设置缓存过期时间
+func (s *Selector[T]) WithSelectorCacheTTL(ttl time.Duration) *Selector[T] {
+	s.useCache = true
+	s.cacheTTL = ttl
+	return s
+}
+
+// WithCacheTags 设置缓存标签
+func (s *Selector[T]) WithCacheTags(tags ...string) *Selector[T] {
+	s.useCache = true
+	s.cacheTags = tags
+	return s
 }
 
 func RegisterSelector[T any](layer Layer) *Selector[T] {
@@ -368,7 +400,10 @@ func (s *Selector[T]) Build() (*Query, error) {
 		}
 	}
 
-	s.builder.WriteByte(';')
+	if str := s.builder.String(); str[len(str)-1] != ';' {
+		s.builder.WriteByte(';')
+	}
+
 	return &Query{
 		SQL:  s.builder.String(),
 		Args: s.args,
@@ -485,6 +520,110 @@ func (s *Selector[T]) Get(ctx context.Context) (*T, error) {
 		return nil, err
 	}
 
+	// 检查是否使用缓存
+	if s.useCache {
+		db := s.layer.getDB()
+		if db.cacheManager != nil && db.cacheManager.IsEnabled() {
+			// 构建查询上下文
+			qc := &QueryContext{
+				QueryType: "query",
+				Query:     q,
+				Model:     s.model,
+				Builder:   s,
+			}
+
+			// 检查是否应该缓存此查询
+			if db.cacheManager.ShouldCache(ctx, qc) {
+				fmt.Printf("Cache enabled for query: %s\n", q.SQL) // 日志
+
+				// 生成缓存键
+				cacheKey := db.cacheManager.GenerateKey(qc)
+				if cacheKey != "" {
+					fmt.Printf("Generated cache key: %s\n", cacheKey) // 日志
+
+					// 尝试从缓存获取结果
+					var cachedResult T
+					err := db.cacheManager.cache.Get(ctx, cacheKey, &cachedResult)
+					if err == nil {
+						// 缓存命中，直接返回
+						fmt.Printf("Cache hit: %+v\n", cachedResult) // 日志
+						return &cachedResult, nil
+					}
+
+					if err != ErrCacheMiss {
+						// 如果是其他错误而非缓存未命中，记录但继续执行查询
+						fmt.Printf("Cache error: %v\n", err) // 日志
+					} else {
+						fmt.Printf("Cache miss for key: %s\n", cacheKey) // 日志
+					}
+
+					// 缓存未命中，执行查询
+					result, err := s.execGet(ctx, q)
+					if err != nil {
+						return nil, err
+					}
+
+					// 查询成功，缓存结果
+					ttl := s.cacheTTL
+					if ttl <= 0 {
+						ttl = db.cacheManager.GetTTL(s.model.GetTableName())
+					}
+
+					tags := s.cacheTags
+					if len(tags) == 0 {
+						tags = db.cacheManager.GetTags(s.model.GetTableName())
+					}
+
+					// 缓存结果部分需要修改
+					fmt.Printf("Caching result: %+v with TTL: %v\n", result, ttl) // 日志
+
+					// 使用标签存储缓存
+					if len(tags) > 0 {
+						// 检查缓存实现是否支持标签
+						if tagCache, ok := db.cacheManager.cache.(interface {
+							SetWithTags(ctx context.Context, key string, value interface{}, ttl time.Duration, tags ...string) error
+						}); ok {
+							err = tagCache.SetWithTags(ctx, cacheKey, result, ttl, tags...)
+							if err != nil {
+								fmt.Printf("Error setting cache with tags: %v\n", err) // 日志
+							} else {
+								fmt.Printf("Cache set with tags: %v\n", tags) // 日志
+							}
+						} else {
+							// 不支持标签，仅设置缓存
+							err = db.cacheManager.cache.Set(ctx, cacheKey, result, ttl)
+							if err != nil {
+								fmt.Printf("Error setting cache: %v\n", err) // 日志
+							}
+						}
+					} else {
+						// 没有标签，直接设置缓存
+						err = db.cacheManager.cache.Set(ctx, cacheKey, result, ttl)
+						if err != nil {
+							fmt.Printf("Error setting cache: %v\n", err) // 日志
+						}
+					}
+
+					return result, nil
+				} else {
+					fmt.Printf("Empty cache key generated\n") // 日志
+				}
+			} else {
+				fmt.Printf("Cache should not be used for this query\n") // 日志
+			}
+		} else {
+			fmt.Printf("Cache manager not enabled\n") // 日志
+		}
+	} else {
+		fmt.Printf("Cache not requested for this query\n") // 日志
+	}
+
+	// 没有使用缓存，直接执行查询
+	return s.execGet(ctx, q)
+}
+
+// execGet 执行获取单行数据的实际查询
+func (s *Selector[T]) execGet(ctx context.Context, q *Query) (*T, error) {
 	// 构建查询上下文
 	qc := &QueryContext{
 		QueryType: "query",
@@ -494,31 +633,24 @@ func (s *Selector[T]) Get(ctx context.Context) (*T, error) {
 	}
 
 	// 确保 layer 初始化了 handler
-	if s.layer.getHandler() == nil {
-		return nil, fmt.Errorf("handler not initialized")
-	}
-
 	res, err := s.layer.HandleQuery(ctx, qc)
 	if err != nil {
 		return nil, err
 	}
+	defer res.Rows.Close()
 
-	rows := res.Rows
-	defer rows.Close()
-
-	if !rows.Next() {
-		return nil, ferr.ErrNoRows
+	if !res.Rows.Next() {
+		return nil, sql.ErrNoRows
 	}
 
-	t, err := s.scanRow(rows)
+	t, err := s.scanRow(res.Rows)
 	if err != nil {
 		return nil, err
 	}
 
-	if rows.Next() {
-		return nil, ferr.ErrTooManyRows
+	if res.Rows.Next() {
+		return nil, fmt.Errorf("multiple rows returned")
 	}
-
 	return t, nil
 }
 
@@ -529,6 +661,82 @@ func (s *Selector[T]) GetMulti(ctx context.Context) ([]*T, error) {
 		return nil, err
 	}
 
+	// 检查是否使用缓存
+	if s.useCache {
+		db := s.layer.getDB()
+		if db.cacheManager != nil && db.cacheManager.IsEnabled() {
+			// 构建查询上下文
+			qc := &QueryContext{
+				QueryType: "query",
+				Query:     q,
+				Model:     s.model,
+				Builder:   s,
+			}
+
+			// 检查是否应该缓存此查询
+			if db.cacheManager.ShouldCache(ctx, qc) {
+				// 生成缓存键
+				cacheKey := db.cacheManager.GenerateKey(qc)
+				if cacheKey != "" {
+					// 尝试从缓存获取结果
+					var cachedResult []*T
+					err := db.cacheManager.cache.Get(ctx, cacheKey, &cachedResult)
+					if err == nil {
+						// 缓存命中，直接返回
+						return cachedResult, nil
+					}
+
+					if err != ErrCacheMiss {
+						// 如果是其他错误而非缓存未命中，记录但继续执行查询
+						fmt.Printf("Cache error: %v\n", err)
+					}
+
+					// 缓存未命中，执行查询
+					result, err := s.execGetMulti(ctx, q)
+					if err != nil {
+						return nil, err
+					}
+
+					// 查询成功，缓存结果
+					ttl := s.cacheTTL
+					if ttl <= 0 {
+						ttl = db.cacheManager.GetTTL(s.model.GetTableName())
+					}
+
+					tags := s.cacheTags
+					if len(tags) == 0 {
+						tags = db.cacheManager.GetTags(s.model.GetTableName())
+					}
+
+					// 缓存结果
+					if len(tags) > 0 {
+						// 检查缓存实现是否支持标签
+						if tagCache, ok := db.cacheManager.cache.(interface {
+							SetWithTags(ctx context.Context, key string, value interface{}, ttl time.Duration, tags ...string) error
+						}); ok {
+							_ = tagCache.SetWithTags(ctx, cacheKey, result, ttl, tags...)
+						} else {
+							// 不支持标签，仅设置缓存
+							_ = db.cacheManager.cache.Set(ctx, cacheKey, result, ttl)
+						}
+					} else {
+						// 没有标签，直接设置缓存
+						_ = db.cacheManager.cache.Set(ctx, cacheKey, result, ttl)
+					}
+
+					return result, nil
+				}
+			}
+		}
+	}
+
+	// 没有使用缓存，直接执行查询
+	return s.execGetMulti(ctx, q)
+}
+
+// execGetMulti 执行获取多行数据的实际查询
+func (s *Selector[T]) execGetMulti(ctx context.Context, q *Query) ([]*T, error) {
+	// 构建查询上下文
 	qc := &QueryContext{
 		QueryType: "query",
 		Query:     q,
@@ -540,18 +748,16 @@ func (s *Selector[T]) GetMulti(ctx context.Context) ([]*T, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer res.Rows.Close()
 
-	rows := res.Rows
-	defer rows.Close()
-
-	result := make([]*T, 0)
-	for rows.Next() {
-		t, err := s.scanRow(rows)
+	var result []*T
+	for res.Rows.Next() {
+		t, err := s.scanRow(res.Rows)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, t)
 	}
 
-	return result, rows.Err()
+	return result, nil
 }

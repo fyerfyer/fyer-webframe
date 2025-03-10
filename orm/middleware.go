@@ -10,7 +10,7 @@ import (
 
 // Handler 处理器接口定义
 type Handler interface {
-	QueryHandler (ctx context.Context, qc *QueryContext)(*QueryResult, error)
+	QueryHandler(ctx context.Context, qc *QueryContext) (*QueryResult, error)
 }
 
 // Middleware 中间件定义
@@ -22,16 +22,18 @@ type QueryContext struct {
 	Query      *Query
 	Model      *model
 	Builder    QueryBuilder
-	TableName  string       // 表名，支持分片时可能会被替换
-	ShardKey   string       // 用于分片的键
-	ShardValue interface{}  // 分片键的值
+	TableName  string      // 表名，支持分片时可能会被替换
+	ShardKey   string      // 用于分片的键
+	ShardValue interface{} // 分片键的值
 }
 
 // QueryResult 查询结果定义
 type QueryResult struct {
-	Result Result
-	Rows   *sql.Rows
-	Err    error
+	Result        Result
+	Rows          *sql.Rows
+	Err           error
+	CachedData    []map[string]interface{} // 缓存的数据
+	CachedColumns []string                 // 缓存的列名
 }
 
 // BuildChain 构建处理器调用链

@@ -13,6 +13,23 @@ type Deleter[T any] struct {
 	args    []any
 	layer   Layer
 	dialect Dialect
+
+	// 缓存相关字段
+	invalidateCache bool     // 是否使缓存失效
+	invalidateTags  []string // 要失效的缓存标签
+}
+
+// WithInvalidateCache 设置是否使相关缓存失效
+func (d *Deleter[T]) WithInvalidateCache() *Deleter[T] {
+	d.invalidateCache = true
+	return d
+}
+
+// WithInvalidateTags 设置要使失效的缓存标签
+func (d *Deleter[T]) WithInvalidateTags(tags ...string) *Deleter[T] {
+	d.invalidateCache = true
+	d.invalidateTags = tags
+	return d
 }
 
 func RegisterDeleter[T any](layer Layer) *Deleter[T] {
@@ -116,7 +133,7 @@ func (d *Deleter[T]) Build() (*Query, error) {
 	}, nil
 }
 
-// Exec 添加执行方法
+// Exec 添加了缓存失效逻辑
 func (d *Deleter[T]) Exec(ctx context.Context) (Result, error) {
 	q, err := d.Build()
 	if err != nil {
@@ -131,6 +148,17 @@ func (d *Deleter[T]) Exec(ctx context.Context) (Result, error) {
 	}
 
 	res, err := d.layer.HandleQuery(ctx, qc)
+
+	// 如果执行成功且需要使缓存失效
+	if err == nil && d.invalidateCache {
+		db := d.layer.getDB()
+		if db.cacheManager != nil && db.cacheManager.IsEnabled() {
+			modelName := d.model.GetTableName()
+			// 传入标签或使用模型的默认标签
+			_ = db.cacheManager.InvalidateCache(ctx, modelName, d.invalidateTags...)
+		}
+	}
+
 	return Result{
 		res: res.Result.res,
 		err: err,
