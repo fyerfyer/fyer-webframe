@@ -27,3 +27,8 @@ go.work.sum
 *.idea
 *.log
 *.rdb
+
+/node_modules
+/node_modules/
+/.docusaurus
+/build
