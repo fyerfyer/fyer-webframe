@@ -129,50 +129,50 @@ func defaultKeyGenerator(model string, operation string, query *Query) string {
 
 // ShouldCache 判断是否应该缓存查询结果
 func (cm *CacheManager) ShouldCache(ctx context.Context, qc *QueryContext) bool {
-    if !cm.enabled {
-        fmt.Println("Cache is globally disabled")
-        return false
-    }
-    
-    // 只对查询操作进行缓存
-    if qc.QueryType != "query" {
-        fmt.Println("Not a query operation")
-        return false
-    }
-    
-    // 获取模型配置
-    if qc.Model == nil {
-        fmt.Println("No model in query context")
-        return false
-    }
-    
-    modelName := qc.Model.GetTableName()
-    fmt.Printf("Checking cache config for model: %s\n", modelName)
-    
-    config, ok := cm.modelCacheConfig[modelName]
-    
-    // 如果没有找到模型配置或缓存被禁用，则不缓存
-    if !ok || !config.Enabled {
-        fmt.Printf("No config found or cache disabled for model %s\n", modelName)
-        return false
-    }
-    
-    fmt.Printf("Cache enabled for model %s\n", modelName)
-    
-    // 检查缓存条件
-    for _, condition := range config.Conditions {
-        if !condition(ctx, qc) {
-            fmt.Println("Cache condition not met")
-            return false
-        }
-    }
-    
-    // 检查 Builder 是否支持缓存
-    if s, ok := qc.Builder.(*Selector[any]); ok {
-        return s.useCache
-    }
-    
-    return true
+	if !cm.enabled {
+		debugLog("Cache is globally disabled")
+		return false
+	}
+
+	// 只对查询操作进行缓存
+	if qc.QueryType != "query" {
+		debugLog("Not a query operation")
+		return false
+	}
+
+	// 获取模型配置
+	if qc.Model == nil {
+		debugLog("No model in query context")
+		return false
+	}
+
+	modelName := qc.Model.GetTableName()
+	debugLog("Checking cache config for model: %s", modelName)
+
+	config, ok := cm.modelCacheConfig[modelName]
+
+	// 如果没有找到模型配置或缓存被禁用，则不缓存
+	if !ok || !config.Enabled {
+		debugLog("No config found or cache disabled for model %s", modelName)
+		return false
+	}
+
+	debugLog("Cache enabled for model %s", modelName)
+
+	// 检查缓存条件
+	for _, condition := range config.Conditions {
+		if !condition(ctx, qc) {
+			debugLog("Cache condition not met")
+			return false
+		}
+	}
+
+	// 检查 Builder 是否支持缓存
+	if s, ok := qc.Builder.(*Selector[any]); ok {
+		return s.useCache
+	}
+
+	return true
 }
 
 // GenerateKey 生成缓存键
@@ -220,19 +220,19 @@ func (cm *CacheManager) InvalidateCache(ctx context.Context, modelName string, t
 	// 修复: 使用提供的标签或模型的默认标签删除缓存
 	if len(tags) > 0 {
 		// 打印调试信息
-		fmt.Printf("Invalidating cache with tags: %v\n", tags)
+		debugLog("Invalidating cache with tags: %v\n", tags)
 		return cm.cache.DeleteByTags(ctx, tags...)
 	}
 
 	// 获取模型的标签
 	modelTags := cm.GetTags(modelName)
 	if len(modelTags) > 0 {
-		fmt.Printf("Invalidating cache with model tags: %v\n", modelTags)
+		debugLog("Invalidating cache with model tags: %v\n", modelTags)
 		return cm.cache.DeleteByTags(ctx, modelTags...)
 	}
 
 	// 没有标签可用时，尝试清空与此模型相关的所有缓存
-	fmt.Printf("No tags provided or defined for model %s, attempting to clear all cache\n", modelName)
+	debugLog("No tags provided or defined for model %s, attempting to clear all cache\n", modelName)
 
 	// 没有标签时，可以尝试使用模型名称作为前缀，清除所有相关缓存
 	// 这需要缓存实现支持按前缀删除的功能

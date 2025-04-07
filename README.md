@@ -155,6 +155,21 @@ BenchmarkStaticResource/MediumFile_WithCache-4      1,819    697,892 ns/op   146
 BenchmarkStaticResource/LargeFile_WithCache-4         194  5,208,565 ns/op   201.32 MB/s
 ```
 
+### ORM 性能
+
+```
+BenchmarkSelectNoCache-4                   1,050    1,100,821 ns/op
+BenchmarkSelectWithCache-4                 3,656      334,870 ns/op
+BenchmarkModelInsert-4                       100   18,020,604 ns/op
+BenchmarkModelBatchInsert-4                8,881      219,231 ns/op
+BenchmarkConcurrentBatchInsert-4          12,687      130,715 ns/op
+BenchmarkQueryById-4                       2,232      539,909 ns/op
+BenchmarkQueryWithComplexCondition-4       1,570      764,017 ns/op
+BenchmarkTransactionBatchOperations-4        369    4,699,809 ns/op
+```
+
+ORM 模块的缓存机制能将查询性能提升约 3.3 倍（334,870 vs 1,100,821 ns/op）；批量操作比单条操作效率高约 82 倍（219,231 vs 18,020,604 ns/op），而并发批量插入则进一步将性能提升至非并发版本的约 1.7 倍。
+
 ## 项目结构
 
 WebFrame 框架主要包含以下模块：

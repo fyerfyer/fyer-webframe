@@ -10,18 +10,18 @@ var (
 	ErrTooManyRows       = fmt.Errorf("too many rows")
 	ErrInsertRowNotFound = fmt.Errorf("insert row not found")
 	ErrUpsertRowNotFound = fmt.Errorf("upsert row not found")
-	ErrPointerOnly       = errors.New("orm: 只支持指向结构体的指针，例如 *User")
+	ErrPointerOnly       = errors.New("orm: only supports pointers to structs, e.g., *User")
 )
 
 var (
-	ErrPoolClosed              = errors.New("orm: 连接池已关闭")
-	ErrPoolFull                = errors.New("orm: 连接池已满")
-	ErrPoolExhausted           = errors.New("orm: 连接池资源耗尽")
-	ErrConnTimeout             = errors.New("orm: 获取连接超时")
-	ErrInvalidConnection       = errors.New("orm: 无效的数据库连接")
-	ErrTransactionOnBrokenConn = errors.New("orm: 无法在已损坏的连接上创建事务")
-	ErrTooManyClients          = errors.New("orm: 等待连接的客户端过多")
-	ErrDBClosed                = errors.New("orm: 在已关闭的数据库上执行操作")
+	ErrPoolClosed              = errors.New("orm: connection pool is closed")
+	ErrPoolFull                = errors.New("orm: connection pool is full")
+	ErrPoolExhausted           = errors.New("orm: connection pool resources exhausted")
+	ErrConnTimeout             = errors.New("orm: connection timeout")
+	ErrInvalidConnection       = errors.New("orm: invalid database connection")
+	ErrTransactionOnBrokenConn = errors.New("orm: cannot create transaction on a broken connection")
+	ErrTooManyClients          = errors.New("orm: too many clients waiting for connection")
+	ErrDBClosed                = errors.New("orm: operation on a closed database")
 )
 
 func ErrInvalidColumn(col string) error {
@@ -29,7 +29,7 @@ func ErrInvalidColumn(col string) error {
 }
 
 func ErrInvalidTag(tag string) error {
-	return fmt.Errorf("orm: 无效的标签 %s", tag)
+	return fmt.Errorf("orm: invalid tag %s", tag)
 }
 
 func ErrInvalidSelectable(col any) error {
@@ -61,13 +61,13 @@ func ErrInvalidOrderBy(v any) error {
 }
 
 func ErrDialTimeout(duration string) error {
-	return fmt.Errorf("orm: 连接数据库超时，超时时间 %s", duration)
+	return fmt.Errorf("orm: database connection timeout, duration %s", duration)
 }
 
 func ErrHealthCheckFailed(reason string) error {
-	return fmt.Errorf("orm: 连接健康检查失败: %s", reason)
+	return fmt.Errorf("orm: connection health check failed: %s", reason)
 }
 
 func ErrCreateConnectionFailed(err error) error {
-	return fmt.Errorf("orm: 创建数据库连接失败: %w", err)
+	return fmt.Errorf("orm: failed to create database connection: %w", err)
 }

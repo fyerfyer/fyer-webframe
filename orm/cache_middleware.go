@@ -3,7 +3,7 @@ package orm
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"errors"
 	"time"
 )
 
@@ -13,75 +13,75 @@ func CacheMiddleware(cacheManager *CacheManager) Middleware {
 		return HandlerFunc(func(ctx context.Context, qc *QueryContext) (*QueryResult, error) {
 			// 如果缓存管理器未启用或查询类型不是查询操作，直接传递到下一个中间件
 			if cacheManager == nil || !cacheManager.IsEnabled() || qc.QueryType != "query" {
-				fmt.Println("Cache middleware: cache disabled or not a query operation")
+				debugLog("Cache middleware: cache disabled or not a query operation")
 				return next.QueryHandler(ctx, qc)
 			}
 
 			// 检查是否应该缓存此查询
 			if !cacheManager.ShouldCache(ctx, qc) {
-				fmt.Println("Cache middleware: should not cache this query")
+				debugLog("Cache middleware: should not cache this query")
 				return next.QueryHandler(ctx, qc)
 			}
 
-			fmt.Println("Cache middleware: checking if we can cache this query")
+			debugLog("Cache middleware: checking if we can cache this query")
 
 			// 生成缓存键
 			cacheKey := cacheManager.GenerateKey(qc)
 			if cacheKey == "" {
 				// 如果无法生成有效的缓存键，直接执行查询而不缓存
-				fmt.Println("Cache middleware: cannot generate cache key")
+				debugLog("Cache middleware: cannot generate cache key")
 				return next.QueryHandler(ctx, qc)
 			}
 
-			fmt.Printf("Cache middleware: checking cache for key %s\n", cacheKey)
+			debugLog("Cache middleware: checking cache for key %s", cacheKey)
 
 			// 尝试从缓存中获取结果
 			var cachedResult QueryResult
 			err := cacheManager.cache.Get(ctx, cacheKey, &cachedResult)
 			if err == nil {
 				// 缓存命中，直接返回缓存的结果
-				fmt.Println("Cache middleware: cache hit")
+				debugLog("Cache middleware: cache hit")
 				return &cachedResult, nil
 			}
 
-			if err != ErrCacheMiss {
+			if !errors.Is(err, ErrCacheMiss) {
 				// 如果是其他错误而非缓存未命中，记录错误但继续执行查询
-				fmt.Printf("Cache middleware: cache error: %v\n", err)
+				debugLog("Cache middleware: cache error: %v", err)
 			} else {
-				fmt.Printf("Cache middleware: cache miss for key %s\n", cacheKey)
+				debugLog("Cache middleware: cache miss for key %s", cacheKey)
 			}
 
 			// 缓存未命中，执行查询
-			fmt.Println("Cache middleware: executing query")
+			debugLog("Cache middleware: executing query")
 			result, err := next.QueryHandler(ctx, qc)
 			if err != nil {
-				fmt.Printf("Cache middleware: query error: %v\n", err)
+				debugLog("Cache middleware: query error: %v", err)
 				return nil, err
 			}
 
 			if result == nil {
-				fmt.Println("Cache middleware: query result is nil")
+				debugLog("Cache middleware: query result is nil")
 				return result, err
 			}
 
 			// 查询成功，缓存结果前需要将结果数据读取到内存
-			fmt.Println("Cache middleware: processing rows for caching")
+			debugLog("Cache middleware: processing rows for caching")
 			if result.Rows != nil {
 				// 获取TTL
 				var ttl time.Duration
 				if qc.Model != nil {
 					ttl = cacheManager.GetTTL(qc.Model.GetTableName())
-					fmt.Printf("Cache middleware: using model TTL: %v\n", ttl)
+					debugLog("Cache middleware: using model TTL: %v", ttl)
 				} else {
 					ttl = cacheManager.defaultTTL
-					fmt.Printf("Cache middleware: using default TTL: %v\n", ttl)
+					debugLog("Cache middleware: using default TTL: %v", ttl)
 				}
 
 				// 缓存结果
-				fmt.Printf("Cache middleware: setting cache with key %s, TTL %v\n", cacheKey, ttl)
+				debugLog("Cache middleware: setting cache with key %s, TTL %v", cacheKey, ttl)
 				_ = cacheManager.cache.Set(ctx, cacheKey, *result, ttl)
 			} else {
-				fmt.Println("Cache middleware: no rows to cache")
+				debugLog("Cache middleware: no rows to cache")
 			}
 
 			return result, err

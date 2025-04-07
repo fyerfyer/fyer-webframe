@@ -3,7 +3,6 @@ package orm
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 )
@@ -181,7 +180,7 @@ func (c *MemoryCache) SetWithTags(ctx context.Context, key string, value interfa
 
 	// 存储键与标签的关系
 	c.keyToTags[key] = tags
-	fmt.Printf("Setting key %s with tags: %v\n", key, tags) // 调试日志
+	debugLog("Setting key %s with tags: %v\n", key, tags) // 调试日志
 
 	// 存储标签与键的关系
 	for _, tag := range tags {
@@ -189,7 +188,7 @@ func (c *MemoryCache) SetWithTags(ctx context.Context, key string, value interfa
 			c.tagToKeys[tag] = make(map[string]struct{})
 		}
 		c.tagToKeys[tag][key] = struct{}{}
-		fmt.Printf("Tag %s now has key: %s\n", tag, key) // 调试日志
+		debugLog("Tag %s now has key: %s\n", tag, key) // 调试日志
 	}
 
 	return nil
@@ -217,24 +216,24 @@ func (c *MemoryCache) DeleteByTags(ctx context.Context, tags ...string) error {
 	// 收集所有要删除的键
 	keysToDelete := make(map[string]struct{})
 
-	fmt.Printf("Deleting cache by tags: %v\n", tags) // 调试日志
+	debugLog("Deleting cache by tags: %v\n", tags) // 调试日志
 
 	for _, tag := range tags {
 		if keys, ok := c.tagToKeys[tag]; ok {
-			fmt.Printf("Found %d keys for tag %s\n", len(keys), tag) // 调试日志
+			debugLog("Found %d keys for tag %s\n", len(keys), tag) // 调试日志
 			for key := range keys {
 				keysToDelete[key] = struct{}{}
 			}
 			// 删除标签映射
 			delete(c.tagToKeys, tag)
 		} else {
-			fmt.Printf("No keys found for tag %s\n", tag) // 调试日志
+			debugLog("No keys found for tag %s\n", tag) // 调试日志
 		}
 	}
 
 	// 删除所有收集到的键
 	for key := range keysToDelete {
-		fmt.Printf("Deleting key: %s\n", key) // 调试日志
+		debugLog("Deleting key: %s\n", key) // 调试日志
 		delete(c.data, key)
 		if keyTags, ok := c.keyToTags[key]; ok {
 			// 清除该键对应的所有标签引用

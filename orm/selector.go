@@ -3,6 +3,7 @@ package orm
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -534,27 +535,27 @@ func (s *Selector[T]) Get(ctx context.Context) (*T, error) {
 
 			// 检查是否应该缓存此查询
 			if db.cacheManager.ShouldCache(ctx, qc) {
-				fmt.Printf("Cache enabled for query: %s\n", q.SQL) // 日志
+				debugLog("Cache enabled for query: %s\n", q.SQL) // 日志
 
 				// 生成缓存键
 				cacheKey := db.cacheManager.GenerateKey(qc)
 				if cacheKey != "" {
-					fmt.Printf("Generated cache key: %s\n", cacheKey) // 日志
+					debugLog("Generated cache key: %s\n", cacheKey) // 日志
 
 					// 尝试从缓存获取结果
 					var cachedResult T
 					err := db.cacheManager.cache.Get(ctx, cacheKey, &cachedResult)
 					if err == nil {
 						// 缓存命中，直接返回
-						fmt.Printf("Cache hit: %+v\n", cachedResult) // 日志
+						debugLog("Cache hit: %+v\n", cachedResult) // 日志
 						return &cachedResult, nil
 					}
 
-					if err != ErrCacheMiss {
+					if !errors.Is(err, ErrCacheMiss) {
 						// 如果是其他错误而非缓存未命中，记录但继续执行查询
-						fmt.Printf("Cache error: %v\n", err) // 日志
+						debugLog("Cache error: %v\n", err) // 日志
 					} else {
-						fmt.Printf("Cache miss for key: %s\n", cacheKey) // 日志
+						debugLog("Cache miss for key: %s\n", cacheKey) // 日志
 					}
 
 					// 缓存未命中，执行查询
@@ -575,7 +576,7 @@ func (s *Selector[T]) Get(ctx context.Context) (*T, error) {
 					}
 
 					// 缓存结果部分需要修改
-					fmt.Printf("Caching result: %+v with TTL: %v\n", result, ttl) // 日志
+					debugLog("Caching result: %+v with TTL: %v\n", result, ttl) // 日志
 
 					// 使用标签存储缓存
 					if len(tags) > 0 {
@@ -585,37 +586,37 @@ func (s *Selector[T]) Get(ctx context.Context) (*T, error) {
 						}); ok {
 							err = tagCache.SetWithTags(ctx, cacheKey, result, ttl, tags...)
 							if err != nil {
-								fmt.Printf("Error setting cache with tags: %v\n", err) // 日志
+								debugLog("Error setting cache with tags: %v\n", err) // 日志
 							} else {
-								fmt.Printf("Cache set with tags: %v\n", tags) // 日志
+								debugLog("Cache set with tags: %v\n", tags) // 日志
 							}
 						} else {
 							// 不支持标签，仅设置缓存
 							err = db.cacheManager.cache.Set(ctx, cacheKey, result, ttl)
 							if err != nil {
-								fmt.Printf("Error setting cache: %v\n", err) // 日志
+								debugLog("Error setting cache: %v\n", err) // 日志
 							}
 						}
 					} else {
 						// 没有标签，直接设置缓存
 						err = db.cacheManager.cache.Set(ctx, cacheKey, result, ttl)
 						if err != nil {
-							fmt.Printf("Error setting cache: %v\n", err) // 日志
+							debugLog("Error setting cache: %v\n", err) // 日志
 						}
 					}
 
 					return result, nil
 				} else {
-					fmt.Printf("Empty cache key generated\n") // 日志
+					debugLog("Empty cache key generated\n") // 日志
 				}
 			} else {
-				fmt.Printf("Cache should not be used for this query\n") // 日志
+				debugLog("Cache should not be used for this query\n") // 日志
 			}
 		} else {
-			fmt.Printf("Cache manager not enabled\n") // 日志
+			debugLog("Cache manager not enabled\n") // 日志
 		}
 	} else {
-		fmt.Printf("Cache not requested for this query\n") // 日志
+		debugLog("Cache not requested for this query\n") // 日志
 	}
 
 	// 没有使用缓存，直接执行查询
@@ -686,9 +687,9 @@ func (s *Selector[T]) GetMulti(ctx context.Context) ([]*T, error) {
 						return cachedResult, nil
 					}
 
-					if err != ErrCacheMiss {
+					if !errors.Is(err, ErrCacheMiss) {
 						// 如果是其他错误而非缓存未命中，记录但继续执行查询
-						fmt.Printf("Cache error: %v\n", err)
+						debugLog("Cache error: %v\n", err)
 					}
 
 					// 缓存未命中，执行查询

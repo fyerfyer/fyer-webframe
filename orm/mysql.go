@@ -180,4 +180,5 @@ func (m Mysql) ColumnType(f *field) string {
 
 func init() {
 	RegisterDialect("mysql", &Mysql{})
+	DisableCacheDebugLog()
 }
