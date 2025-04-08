@@ -14,8 +14,8 @@ type Node struct {
     // 静态子节点映射
     children map[string]*Node
 
-    // 参数子节点，例如 :id
-    paramChild *Node
+    // 参数子节点映射，键为参数名
+    paramChildren map[string]*Node
 
     // 正则参数子节点，例如 :id([0-9]+)
     regexChildren []*Node
@@ -28,8 +28,7 @@ type Node struct {
 
     // 是否是参数节点
     isParam bool
-
-    // 参数名称，例如在 :id 中，参数名为 "id"
+    
     paramName string
 
     // 是否是正则节点
@@ -43,6 +42,7 @@ type Node struct {
 func NewNode() *Node {
     return &Node{
         children: make(map[string]*Node),
+        paramChildren: make(map[string]*Node),  // 初始化参数子节点映射
         regexChildren: make([]*Node, 0),
     }
 }
@@ -62,6 +62,24 @@ func (n *Node) Insert(path string, handler interface{}) {
     path = strings.Trim(path, "/")
     segments := strings.Split(path, "/")
 
+    wildcardCount := 0
+    wildcardIndex := -1
+    for i, segment := range segments {
+        if segment == "*" {
+            wildcardCount++
+            wildcardIndex = i
+        }
+    }
+
+    // 只允许一个通配符段
+    if wildcardCount > 1 {
+        panic("only one wildcard segment is allowed in path")
+    }
+
+    if wildcardIndex >= 0 && wildcardIndex < len(segments)-1 {
+        panic("wildcard segment must be the last segment in path")
+    }
+
     current := n
     for i, segment := range segments {
         // 跳过空段
@@ -76,6 +94,7 @@ func (n *Node) Insert(path string, handler interface{}) {
                 current.wildcardChild = &Node{
                     path: "*",
                     children: make(map[string]*Node),
+                    paramChildren: make(map[string]*Node),
                     regexChildren: make([]*Node, 0),
                 }
             } else if i == len(segments) - 1 && current.wildcardChild.handler != nil {
@@ -91,30 +110,27 @@ func (n *Node) Insert(path string, handler interface{}) {
             // 提取正则表达式
             if strings.Contains(paramName, "(") {
                 regexStart := strings.Index(paramName, "(")
-                
-                // If there's an opening parenthesis but no closing one, panic
+
                 if !strings.Contains(paramName, ")") {
                     panic(fmt.Sprintf("invalid regex pattern in '%s': missing closing parenthesis", segment))
                 }
-                
+
                 regexEnd := strings.LastIndex(paramName, ")")
-                
-                // The closing parenthesis must come after the opening one
+
                 if regexEnd <= regexStart {
                     panic(fmt.Sprintf("invalid regex pattern in '%s': misplaced parentheses", segment))
                 }
-                
+
                 regexStr := paramName[regexStart + 1:regexEnd]
                 paramName = paramName[:regexStart]
-                
-                // Check for same-named parameters with different regex
+
+                // 检查是否有相同参数名的正则节点
                 for _, regexNode := range current.regexChildren {
                     if regexNode.paramName == paramName && regexNode.pattern.String() != "^"+regexStr+"$" {
                         panic(fmt.Sprintf("conflicting parameter name '%s' with different regex patterns", paramName))
                     }
                 }
-                
-                // Try to compile the regex, should panic on failure
+
                 var err error
                 pattern, err = regexp.Compile("^" + regexStr + "$")
                 if err != nil {
@@ -141,6 +157,7 @@ func (n *Node) Insert(path string, handler interface{}) {
                     matchingNode = &Node{
                         path: segment,
                         children: make(map[string]*Node),
+                        paramChildren: make(map[string]*Node),
                         regexChildren: make([]*Node, 0),
                         isParam: true,
                         isRegex: true,
@@ -153,19 +170,41 @@ func (n *Node) Insert(path string, handler interface{}) {
                 }
                 current = matchingNode
             } else {
-                // 普通参数节点
-                if current.paramChild == nil {
-                    current.paramChild = &Node{
+                // 普通参数节点 - 使用参数名称作为键
+                
+                // 检查是否有参数路径冲突（终止节点的情况）
+                // 如果尝试注册的是终止节点，并且已存在其他参数节点也是终止节点
+                // 这种情况应该被视为冲突，需要 panic
+
+                // todo: 其实这样检测忽略了参数路径位于中间的路径冲突，这样的检测是不完整的，不过用户不应该这样使用路由
+                if i == len(segments) - 1 {
+                    // 检查所有现有的参数节点
+                    for existingParamName, existingParamNode := range current.paramChildren {
+                        // 如果参数名不同，且已有节点是终止节点（有处理函数）
+                        if existingParamName != paramName && existingParamNode.handler != nil {
+                            panic(fmt.Sprintf("conflicting parameter names at same position: '%s' and '%s'", 
+                                existingParamName, paramName))
+                        }
+                    }
+                }
+                
+                if _, exists := current.paramChildren[paramName]; !exists {
+                    // 如果该参数名称不存在，创建新节点
+                    current.paramChildren[paramName] = &Node{
                         path: segment,
                         children: make(map[string]*Node),
+                        paramChildren: make(map[string]*Node),
                         regexChildren: make([]*Node, 0),
                         isParam: true,
                         paramName: paramName,
                     }
-                } else if i == len(segments) - 1 && current.paramChild.handler != nil && current.paramChild.paramName == paramName {
+                } else if i == len(segments) - 1 && current.paramChildren[paramName].handler != nil &&
+                          len(current.paramChildren[paramName].children) == 0 {
+                    // 只在没有子节点的情况下不允许重复注册
                     panic(fmt.Sprintf("duplicate router '%s' registered", path))
                 }
-                current = current.paramChild
+                // 移动到对应参数名的节点
+                current = current.paramChildren[paramName]
             }
         } else {
             // 静态节点
@@ -174,6 +213,7 @@ func (n *Node) Insert(path string, handler interface{}) {
                 child = &Node{
                     path: segment,
                     children: make(map[string]*Node),
+                    paramChildren: make(map[string]*Node),
                     regexChildren: make([]*Node, 0),
                 }
                 current.children[segment] = child
@@ -201,10 +241,13 @@ func (n *Node) Find(path string, params map[string]string) (interface{}, bool) {
     path = strings.Trim(path, "/")
     segments := strings.Split(path, "/")
 
+    //fmt.Printf("[DEBUG] Finding path in RadixTree: %s\n", path)
+
     // 使用迭代而非递归进行查找
     current := n
     for i := 0; i < len(segments); {
         segment := segments[i]
+        //fmt.Printf("[DEBUG] Processing segment: '%s' at index %d\n", segment, i)
         if segment == "" {
             i++
             continue
@@ -233,44 +276,61 @@ func (n *Node) Find(path string, params map[string]string) (interface{}, bool) {
         }
 
         // 3. 参数匹配 (第三优先级)
-        if current.paramChild != nil {
-            // 正常参数匹配
-            params[current.paramChild.paramName] = segment
+        // 尝试所有可能的参数匹配，先检查当前节点路径下是否有可以继续匹配的
+        paramMatched := false
+        if len(current.paramChildren) > 0 {
+            for paramName, paramNode := range current.paramChildren {
+                // 检查此参数路径是否能匹配后续段
+                canMatchLater := true
 
-            // 这里是关键：如果参数子节点下还有子节点并且当前不是最后一个段，
-            // 我们需要继续检查之后的段能否匹配参数子节点的子节点
-            if i < len(segments)-1 {
-                // 检查参数子节点是否有子节点可以匹配后续段
-                nextSegment := segments[i+1]
-                // 如果有静态子节点、参数子节点或通配符子节点可以匹配下一段，继续匹配
-                paramChildCanMatch := false
-                if _, ok := current.paramChild.children[nextSegment]; ok {
-                    paramChildCanMatch = true
-                } else {
+                if i < len(segments)-1 {
+                    // 还有更多段需要匹配
+                    nextSegment := segments[i+1]
+
+                    // 检查参数节点的子节点是否能匹配下一段
+                    nextSegmentCanMatch := false
+
+                    // 检查静态子节点
+                    if _, ok := paramNode.children[nextSegment]; ok {
+                        nextSegmentCanMatch = true
+                    }
+
                     // 检查正则子节点
-                    for _, regexChild := range current.paramChild.regexChildren {
-                        if regexChild.pattern.MatchString(nextSegment) {
-                            paramChildCanMatch = true
-                            break
+                    if !nextSegmentCanMatch {
+                        for _, regexChild := range paramNode.regexChildren {
+                            if regexChild.pattern.MatchString(nextSegment) {
+                                nextSegmentCanMatch = true
+                                break
+                            }
                         }
                     }
 
-                    if !paramChildCanMatch && current.paramChild.paramChild != nil {
-                        paramChildCanMatch = true
-                    } else if !paramChildCanMatch && current.paramChild.wildcardChild != nil {
-                        paramChildCanMatch = true
+                    // 检查参数子节点
+                    if !nextSegmentCanMatch && len(paramNode.paramChildren) > 0 {
+                        nextSegmentCanMatch = true
                     }
+
+                    // 检查通配符子节点
+                    if !nextSegmentCanMatch && paramNode.wildcardChild != nil {
+                        nextSegmentCanMatch = true
+                    }
+
+                    canMatchLater = nextSegmentCanMatch
                 }
 
-                if paramChildCanMatch {
-                    current = current.paramChild
+                if canMatchLater {
+                    // 这个参数节点可以匹配当前段并且可能能匹配后续段
+                    params[paramName] = segment
+                    //fmt.Printf("[DEBUG] Matched parameter: %s = %s\n", paramName, segment)
+                    current = paramNode
                     i++
-                    continue
+                    paramMatched = true
+                    break
                 }
-            } else {
-                // 如果是最后一个段，直接使用参数匹配
-                current = current.paramChild
-                i++
+            }
+
+            // 如果找到匹配的参数路径，继续下一轮循环
+            if paramMatched {
                 continue
             }
         }
@@ -289,12 +349,14 @@ func (n *Node) Find(path string, params map[string]string) (interface{}, bool) {
 
     // 完成所有段的匹配后，检查是否有处理函数
     if current.handler != nil {
+        //fmt.Printf("[DEBUG] Final matched params: %v\n", params)
         return current.handler, true
     }
 
     // 如果当前节点无处理函数但有通配符子节点，返回通配符子节点的处理函数
     if current.wildcardChild != nil {
         params["*"] = ""
+        //fmt.Printf("[DEBUG] Final matched params: %v\n", params)
         return current.wildcardChild.handler, current.wildcardChild.handler != nil
     }
 

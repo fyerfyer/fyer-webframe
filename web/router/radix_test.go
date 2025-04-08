@@ -489,18 +489,6 @@ func TestRadixTree_DuplicateRoutes(t *testing.T) {
 			shouldPanic: false,
 		},
 		{
-			name: "Different parameter names should not panic",
-			routes: []struct {
-				method  string
-				path    string
-				handler interface{}
-			}{
-				{http.MethodGet, "/users/:id", handler1},
-				{http.MethodGet, "/users/:userId", handler2},
-			},
-			shouldPanic: false,
-		},
-		{
 			name: "Different regex patterns should not panic",
 			routes: []struct {
 				method  string

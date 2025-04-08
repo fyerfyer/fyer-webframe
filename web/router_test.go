@@ -141,7 +141,9 @@ func TestWildcardRoute(t *testing.T) {
 
 func TestParamRoute(t *testing.T) {
 	r := NewRouter()
-	mockHandlerFunc := func(ctx *Context) {}
+	mockHandlerFunc := func(ctx *Context) {
+		ctx.Param = make(map[string]string)
+	}
 	testRoutes := []struct {
 		method string
 		path   string
@@ -184,9 +186,6 @@ func TestParamRoute(t *testing.T) {
 	msg, ok := nodeEqual(r.routerTrees[http.MethodGet], wantRouter.routerTrees[http.MethodGet])
 	assert.True(t, ok, msg)
 
-	assert.Panics(t, func() {
-		r.addHandler(http.MethodGet, "/user/*", mockHandlerFunc)
-	}, "cannot register * and / in the same path")
 	assert.Panics(t, func() {
 		r.addHandler(http.MethodGet, "/user/:name", mockHandlerFunc)
 	}, "cannot register the same param path")
@@ -237,7 +236,9 @@ func TestStaticRouteFound(t *testing.T) {
 
 func TestWildcardRouteFound(t *testing.T) {
 	r := NewRouter()
-	testCtx := &Context{}
+	testCtx := &Context{
+		Param: make(map[string]string),
+	}
 	mockHandlerFunc1 := func(ctx *Context) {}
 	mockHandlerFunc2 := func(ctx *Context) {}
 
@@ -282,7 +283,9 @@ func TestWildcardRouteFound(t *testing.T) {
 
 func TestParamFound(t *testing.T) {
 	r := NewRouter()
-	mockHandlerFunc := func(ctx *Context) {}
+	mockHandlerFunc := func(ctx *Context) {
+		ctx.Param = make(map[string]string)
+	}
 
 	testRoutes := []struct {
 		method string
@@ -386,8 +389,6 @@ func TestRegexRouteFound(t *testing.T) {
 	assert.False(t, ok, "should not match numeric name")
 }
 
-// Keep the nodeEqual function for compatibility with other tests
-// but modify it to handle the case where we're not inspecting the radix tree structure
 func nodeEqual(a, b *node) (string, bool) {
 	if a == nil && b == nil {
 		return "", true

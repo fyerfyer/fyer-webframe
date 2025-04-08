@@ -43,7 +43,7 @@ func (r *RadixTree) Find(method, path string, params map[string]string) (interfa
 
 	// 检查当前HTTP方法是否有对应的树
 	root, ok := r.trees[method]
-	if (!ok) {
+	if !ok {
 		return nil, false
 	}
 
@@ -127,8 +127,8 @@ func printNode(sb *strings.Builder, n *Node, level int) {
 	}
 
 	// 打印参数子节点
-	if n.paramChild != nil {
-		printNode(sb, n.paramChild, level+1)
+	for _, paramChild := range n.paramChildren {
+		printNode(sb, paramChild, level+1)
 	}
 
 	// 打印正则子节点
@@ -171,8 +171,8 @@ func countHandlers(n *Node) int {
 	}
 
 	// 统计参数子节点
-	if n.paramChild != nil {
-		count += countHandlers(n.paramChild)
+	for _, paramChild := range n.paramChildren {
+		count += countHandlers(paramChild)
 	}
 
 	// 统计正则子节点
