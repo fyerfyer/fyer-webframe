@@ -8,309 +8,274 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRegexRoute(t *testing.T) {
-	tree := NewRadixTree()
-	handler := func() {}
+func TestRegexCache(t *testing.T) {
+	t.Run("basic caching", func(t *testing.T) {
+		cache := NewRegexCache()
 
-	// 测试基本的正则路由
-	tree.Add(http.MethodGet, "/users/:id([0-9]+)", handler)
-	tree.Add(http.MethodGet, "/posts/:slug([a-z0-9-]+)", handler)
-	tree.Add(http.MethodGet, "/files/:filename([^/]+\\.pdf)", handler)
+		// 第一次获取编译并缓存
+		pattern1, err := cache.Get("[0-9]+")
+		require.NoError(t, err, "Should compile valid regex")
+		assert.Equal(t, 1, cache.Size(), "Cache should have 1 item")
 
-	// 验证路由数量
-	assert.Equal(t, 3, tree.Routes(), "Total routes should be 3")
+		// 第二次获取应从缓存中获取
+		pattern2, err := cache.Get("[0-9]+")
+		require.NoError(t, err, "Should retrieve from cache")
+		assert.Same(t, pattern1, pattern2, "Should return same compiled instance")
 
-	t.Run("valid regex path", func(t *testing.T) {
-		testCases := []struct {
-			path   string
-			params map[string]string
-		}{
-			{
-				"/users/123",
-				map[string]string{"id": "123"},
-			},
-			{
-				"/posts/my-first-post",
-				map[string]string{"slug": "my-first-post"},
-			},
-			{
-				"/files/document.pdf",
-				map[string]string{"filename": "document.pdf"},
-			},
-		}
-
-		for _, tc := range testCases {
-			params := make(map[string]string)
-			handler, found := tree.Find(http.MethodGet, tc.path, params)
-
-			assert.True(t, found, "Route should be found: %s", tc.path)
-			assert.NotNil(t, handler, "Handler should not be nil for path: %s", tc.path)
-
-			for key, expectedValue := range tc.params {
-				value, exists := params[key]
-				assert.True(t, exists, "Parameter %s should exist", key)
-				assert.Equal(t, expectedValue, value, "Parameter %s value should be %s", key, expectedValue)
-			}
-		}
+		// 获取另一个不同的正则
+		pattern3, err := cache.Get("[a-z]+")
+		require.NoError(t, err, "Should compile second regex")
+		assert.Equal(t, 2, cache.Size(), "Cache should have 2 items")
+		assert.NotSame(t, pattern1, pattern3, "Different patterns should be different instances")
 	})
 
-	t.Run("invalid regex path", func(t *testing.T) {
-		testCases := []struct {
-			path string
-		}{
-			{"/users/abc"},           // 不是数字
-			{"/posts/INVALID_SLUG"},  // 包含大写字母
-			{"/files/document.txt"},  // 不是pdf文件
-		}
+	t.Run("error handling", func(t *testing.T) {
+		cache := NewRegexCache()
 
-		for _, tc := range testCases {
-			params := make(map[string]string)
-			_, found := tree.Find(http.MethodGet, tc.path, params)
-			assert.False(t, found, "Route should not be found: %s", tc.path)
-		}
-	})
+		// 测试无效正则表达式
+		_, err := cache.Get("[unclosed")
+		assert.Error(t, err, "Should return error for invalid regex")
 
-	t.Run("正则表达式语法错误", func(t *testing.T) {
+		// 测试MustGet的panic行为
 		assert.Panics(t, func() {
-			tree.Add(http.MethodGet, "/invalid/:id([abc)", handler)
-		}, "Should panic with invalid regex")
+			cache.MustGet("[unclosed")
+		}, "MustGet should panic on invalid regex")
+	})
+
+	t.Run("cache operations", func(t *testing.T) {
+		cache := NewRegexCache()
+
+		// 填充缓存
+		cache.MustGet("[0-9]+")
+		cache.MustGet("[a-z]+")
+		assert.Equal(t, 2, cache.Size(), "Cache should have 2 items before clear")
+
+		// 清空缓存
+		cache.Clear()
+		assert.Equal(t, 0, cache.Size(), "Cache should be empty after clear")
 	})
 }
 
-func TestComplexRegexPatterns(t *testing.T) {
-	tree := NewRadixTree()
-	handler := func() {}
+func TestRegexRouting(t *testing.T) {
+	t.Run("numeric parameters", func(t *testing.T) {
+		tree := NewRadixTree()
+		handler := func() {}
 
-	// 添加一些复杂的正则表达式路由
-	tree.Add(http.MethodGet, "/api/:version(v[0-9]+)/users", handler)
-	tree.Add(http.MethodGet, "/date/:year([0-9]{4})/:month([0-9]{2})/:day([0-9]{2})", handler)
-	tree.Add(http.MethodGet, "/products/:category([a-z]+)/:id([0-9]{3,10})", handler)
-	tree.Add(http.MethodGet, "/download/:filename([^/]+\\.(zip|tar\\.gz|rar))", handler)
+		// 注册带数字ID参数的路由
+		tree.Add(http.MethodGet, "/users/:id([0-9]+)", handler)
 
-	t.Run("complex regex path", func(t *testing.T) {
-		testCases := []struct {
-			path   string
-			params map[string]string
-		}{
-			{
-				"/api/v1/users",
-				map[string]string{"version": "v1"},
-			},
-			{
-				"/date/2023/05/23",
-				map[string]string{"year": "2023", "month": "05", "day": "23"},
-			},
-			{
-				"/products/electronics/12345",
-				map[string]string{"category": "electronics", "id": "12345"},
-			},
-			{
-				"/download/archive.zip",
-				map[string]string{"filename": "archive.zip"},
-			},
-			{
-				"/download/data.tar.gz",
-				map[string]string{"filename": "data.tar.gz"},
-			},
-		}
-
-		for _, tc := range testCases {
-			params := make(map[string]string)
-			handler, found := tree.Find(http.MethodGet, tc.path, params)
-
-			assert.True(t, found, "Route should be found: %s", tc.path)
-			assert.NotNil(t, handler, "Handler should not be nil for path: %s", tc.path)
-
-			for key, expectedValue := range tc.params {
-				value, exists := params[key]
-				assert.True(t, exists, "Parameter %s should exist", key)
-				assert.Equal(t, expectedValue, value, "Parameter %s value should be %s", key, expectedValue)
-			}
-		}
-	})
-
-	t.Run("invalid complex regex path", func(t *testing.T) {
-		invalidPaths := []string{
-			"/api/version1/users",     // 不符合v数字格式
-			"/date/23/05/23",          // 年份需要4位
-			"/date/2023/5/23",         // 月份需要2位
-			"/products/123/456",       // 类别应该是字母
-			"/download/archive.exe",   // 不支持的扩展名
-		}
-
-		for _, path := range invalidPaths {
-			params := make(map[string]string)
-			_, found := tree.Find(http.MethodGet, path, params)
-			assert.False(t, found, "Route should not be found: %s", path)
-		}
-	})
-}
-
-func TestNestedRegexParameters(t *testing.T) {
-	tree := NewRadixTree()
-	handler := func() {}
-
-	// 嵌套的带正则表达式的路由
-	tree.Add(http.MethodGet, "/api/:version(v[0-9]+)/users/:id([0-9]+)", handler)
-	tree.Add(http.MethodGet, "/blog/:year([0-9]{4})/:month([0-9]{2})/:slug([a-z0-9-]+)", handler)
-
-	t.Run("match regex param", func(t *testing.T) {
+		// 有效匹配
 		params := make(map[string]string)
-		handler, found := tree.Find(http.MethodGet, "/api/v1/users/123", params)
+		_, found := tree.Find(http.MethodGet, "/users/123", params)
+		assert.True(t, found, "Should find route with numeric ID")
+		assert.Equal(t, "123", params["id"], "Should extract correct ID parameter")
 
-		assert.True(t, found, "Nested regex route should be found")
-		assert.NotNil(t, handler, "Handler should not be nil")
-		assert.Equal(t, "v1", params["version"], "Version parameter should match")
-		assert.Equal(t, "123", params["id"], "ID parameter should match")
-
-		// 重置参数映射
+		// 无效匹配
 		params = make(map[string]string)
-		handler, found = tree.Find(http.MethodGet, "/blog/2023/05/my-first-post", params)
-
-		assert.True(t, found, "Nested regex blog route should be found")
-		assert.NotNil(t, handler, "Handler should not be nil")
-		assert.Equal(t, "2023", params["year"], "Year parameter should match")
-		assert.Equal(t, "05", params["month"], "Month parameter should match")
-		assert.Equal(t, "my-first-post", params["slug"], "Slug parameter should match")
+		_, found = tree.Find(http.MethodGet, "/users/abc", params)
+		assert.False(t, found, "Should not find route with non-numeric ID")
 	})
 
-	t.Run("invalid regex param", func(t *testing.T) {
-		invalidPaths := []string{
-			"/api/ver1/users/123",        // 版本格式不正确
-			"/api/v1/users/abc",          // ID不是数字
-			"/blog/23/05/my-post",        // 年份需要4位
-			"/blog/2023/5/my-post",       // 月份需要2位
-			"/blog/2023/05/MY-POST",      // slug不能有大写字母
-		}
+	t.Run("alphanumeric parameters", func(t *testing.T) {
+		tree := NewRadixTree()
+		handler := func() {}
 
-		for _, path := range invalidPaths {
-			params := make(map[string]string)
-			_, found := tree.Find(http.MethodGet, path, params)
-			assert.False(t, found, "Route should not be found: %s", path)
-		}
-	})
-}
+		// 注册带字母数字参数的路由
+		tree.Add(http.MethodGet, "/products/:code([a-z0-9]+)", handler)
 
-func TestRegexCacheUsage(t *testing.T) {
-	// 创建一个自定义的正则缓存进行测试
-	cache := NewRegexCache()
-
-	// 测试缓存的基本功能
-	pattern := "[0-9]+"
-	regex1, err1 := cache.Get(pattern)
-	require.NoError(t, err1, "First regex compilation should succeed")
-
-	regex2, err2 := cache.Get(pattern)
-	require.NoError(t, err2, "Second regex compilation should succeed")
-
-	// 检查两次获取的是同一个正则对象
-	assert.Same(t, regex1, regex2, "Cached regex objects should be identical")
-
-	// 测试缓存大小
-	assert.Equal(t, 1, cache.Size(), "Cache should contain 1 item")
-
-	// 测试错误处理
-	_, err := cache.Get("(invalid")
-	assert.Error(t, err, "Invalid regex should return error")
-
-	// 测试MustGet
-	assert.Panics(t, func() {
-		cache.MustGet("(invalid")
-	}, "MustGet should panic with invalid regex")
-
-	// 测试缓存清理
-	cache.Clear()
-	assert.Equal(t, 0, cache.Size(), "Cache should be empty after clearing")
-}
-
-func TestRegexVsParamPriority(t *testing.T) {
-	tree := NewRadixTree()
-
-	// 添加正则和普通参数路由
-	regexHandler := func() {}
-	paramHandler := func() {}
-
-	tree.Add(http.MethodGet, "/users/:id([0-9]+)/profile", regexHandler)
-	tree.Add(http.MethodGet, "/users/:name/settings", paramHandler)
-
-	t.Run("regex match priority", func(t *testing.T) {
-		// 应该匹配第一个路由，因为id符合正则表达式
+		// 有效匹配
 		params := make(map[string]string)
-		handler, found := tree.Find(http.MethodGet, "/users/123/profile", params)
+		_, found := tree.Find(http.MethodGet, "/products/product123", params)
+		assert.True(t, found, "Should find route with alphanumeric code")
+		assert.Equal(t, "product123", params["code"], "Should extract correct code parameter")
 
+		// 无效匹配
+		params = make(map[string]string)
+		_, found = tree.Find(http.MethodGet, "/products/PRODUCT123", params)
+		assert.False(t, found, "Should not find route with uppercase letters")
+	})
+
+	t.Run("date format parameters", func(t *testing.T) {
+		tree := NewRadixTree()
+		handler := func() {}
+
+		// 注册带日期格式参数的路由
+		tree.Add(http.MethodGet, "/events/:date([0-9]{4}-[0-9]{2}-[0-9]{2})", handler)
+
+		// 有效匹配
+		params := make(map[string]string)
+		_, found := tree.Find(http.MethodGet, "/events/2023-12-31", params)
+		assert.True(t, found, "Should find route with valid date format")
+		assert.Equal(t, "2023-12-31", params["date"], "Should extract correct date parameter")
+
+		// 无效匹配
+		params = make(map[string]string)
+		_, found = tree.Find(http.MethodGet, "/events/2023/12/31", params)
+		assert.False(t, found, "Should not find route with invalid date format")
+	})
+
+	t.Run("slugs and file extensions", func(t *testing.T) {
+		tree := NewRadixTree()
+		handler := func() {}
+
+		tree.Add(http.MethodGet, "/posts/:slug([a-z0-9-]+)", handler)
+
+		// 测试slug
+		params := make(map[string]string)
+		_, found := tree.Find(http.MethodGet, "/posts/my-awesome-post-123", params)
+		assert.True(t, found, "Should find route with valid slug")
+		assert.Equal(t, "my-awesome-post-123", params["slug"], "Should extract correct slug parameter")
+	})
+
+	t.Run("route priority", func(t *testing.T) {
+		tree := NewRadixTree()
+
+		// 定义不同的处理器
+		type Handler struct { name string }
+		staticHandler := &Handler{name: "static"}
+		regexHandler := &Handler{name: "regex"}
+		paramHandler := &Handler{name: "param"}
+		wildcardHandler := &Handler{name: "wildcard"}
+
+		// 注册不同类型的路由
+		tree.Add(http.MethodGet, "/api/users/list", staticHandler)
+		tree.Add(http.MethodGet, "/api/users/:id([0-9]+)", regexHandler)
+		tree.Add(http.MethodGet, "/api/users/:name", paramHandler)
+		tree.Add(http.MethodGet, "/api/users/*", wildcardHandler)
+
+		// 测试优先级匹配
+		params := make(map[string]string)
+
+		// 静态路由应该优先
+		handler, found := tree.Find(http.MethodGet, "/api/users/list", params)
+		assert.True(t, found, "Static route should be found")
+		assert.Equal(t, staticHandler, handler, "Static route should have highest priority")
+
+		// 正则路由其次
+		params = make(map[string]string)
+		handler, found = tree.Find(http.MethodGet, "/api/users/123", params)
 		assert.True(t, found, "Regex route should be found")
-		assert.Equal(t, regexHandler, handler, "Should match regex handler")
-		assert.Equal(t, "123", params["id"], "ID parameter should be extracted")
+		assert.Equal(t, regexHandler, handler, "Regex route should have second highest priority")
+		assert.Equal(t, "123", params["id"], "Regex parameter should be extracted")
+
+		// 普通参数路由再次
+		params = make(map[string]string)
+		handler, found = tree.Find(http.MethodGet, "/api/users/john", params)
+		assert.True(t, found, "Parameter route should be found")
+		assert.Equal(t, paramHandler, handler, "Parameter route should have third highest priority")
+		assert.Equal(t, "john", params["name"], "Parameter should be extracted")
+
+		// 通配符路由最后
+		params = make(map[string]string)
+		handler, found = tree.Find(http.MethodGet, "/api/users/something/else", params)
+		assert.True(t, found, "Wildcard route should be found")
+		assert.Equal(t, wildcardHandler, handler, "Wildcard route should have lowest priority")
+		assert.Equal(t, "something/else", params["*"], "Wildcard parameter should be extracted")
 	})
 
-	t.Run("param route", func(t *testing.T) {
-		// 匹配参数路由
-		params := make(map[string]string)
-		handler, found := tree.Find(http.MethodGet, "/users/john/settings", params)
+	t.Run("multiple regex parameters", func(t *testing.T) {
+		tree := NewRadixTree()
+		handler := func() {}
 
-		assert.True(t, found, "Parameter route should be found")
-		assert.Equal(t, paramHandler, handler, "Should match parameter handler")
-		assert.Equal(t, "john", params["name"], "Name parameter should be extracted")
+		// 注册带多个正则参数的路由
+		tree.Add(http.MethodGet, "/api/:version(v[0-9])/users/:id([0-9]+)", handler)
+
+		// 测试有效匹配
+		params := make(map[string]string)
+		_, found := tree.Find(http.MethodGet, "/api/v1/users/123", params)
+		assert.True(t, found, "Should find route with multiple regex parameters")
+		assert.Equal(t, "v1", params["version"], "Should extract correct version parameter")
+		assert.Equal(t, "123", params["id"], "Should extract correct id parameter")
+
+		// 测试部分无效匹配
+		params = make(map[string]string)
+		_, found = tree.Find(http.MethodGet, "/api/v12/users/123", params)
+		assert.False(t, found, "Should not find route when first parameter doesn't match")
+
+		params = make(map[string]string)
+		_, found = tree.Find(http.MethodGet, "/api/v1/users/abc", params)
+		assert.False(t, found, "Should not find route when second parameter doesn't match")
+	})
+
+	t.Run("duplicate regex routes", func(t *testing.T) {
+		tree := NewRadixTree()
+		handler := func() {}
+
+		// 添加一个正则路由
+		tree.Add(http.MethodGet, "/users/:id([0-9]+)", handler)
+
+		// 再次添加同样的路由应该会panic
+		assert.Panics(t, func() {
+			tree.Add(http.MethodGet, "/users/:id([0-9]+)", handler)
+		}, "Adding duplicate regex route should panic")
+
+		// 添加同名参数但不同正则也应该会panic
+		assert.Panics(t, func() {
+			tree.Add(http.MethodGet, "/users/:id([a-z]+)", handler)
+		}, "Adding different regex with same parameter name should panic")
+	})
+
+	t.Run("invalid regex", func(t *testing.T) {
+		tree := NewRadixTree()
+		handler := func() {}
+
+		// 添加无效正则表达式应该会panic
+		assert.Panics(t, func() {
+			tree.Add(http.MethodGet, "/users/:id([0-9", handler)
+		}, "Adding invalid regex should panic")
 	})
 }
 
-func TestEdgeCasesForRegex(t *testing.T) {
+// 测试正则表达式加上静态路径的组合
+func TestRegexWithStaticSuffix(t *testing.T) {
 	tree := NewRadixTree()
 	handler := func() {}
 
-	// 测试边缘情况
-	tree.Add(http.MethodGet, "/empty/:param()", handler) // 空的正则表达式
-	tree.Add(http.MethodGet, "/optional/:param([0-9]*)", handler) // 可选的数字
-	tree.Add(http.MethodGet, "/special/:param([\\w\\-\\.]+)", handler) // 特殊字符
+	// 注册带正则参数后接静态路径的路由
+	tree.Add(http.MethodGet, "/users/:id([0-9]+)/profile", handler)
 
-	t.Run("edge cases", func(t *testing.T) {
-		testCases := []struct {
-			path       string
-			shouldFind bool
-			paramValue string
-		}{
-			{"/empty/", true, ""}, // 空参数
-			{"/optional/", true, ""}, // 可选数字，空值
-			{"/optional/123", true, "123"}, // 可选数字
-			{"/special/file-name.txt", true, "file-name.txt"}, // 特殊字符
-			{"/special/user_name-123.jpg", true, "user_name-123.jpg"}, // 更多特殊字符
-		}
+	// 测试有效匹配
+	params := make(map[string]string)
+	_, found := tree.Find(http.MethodGet, "/users/123/profile", params)
+	assert.True(t, found, "Should find route with regex parameter and static suffix")
+	assert.Equal(t, "123", params["id"], "Should extract correct id parameter")
 
-		for _, tc := range testCases {
-			params := make(map[string]string)
-			_, found := tree.Find(http.MethodGet, tc.path, params)
+	// 测试无效匹配 - 参数不匹配
+	params = make(map[string]string)
+	_, found = tree.Find(http.MethodGet, "/users/abc/profile", params)
+	assert.False(t, found, "Should not find route when regex parameter doesn't match")
 
-			if tc.shouldFind {
-				assert.True(t, found, "Route should be found: %s", tc.path)
-				if tc.paramValue != "" {
-					assert.Equal(t, tc.paramValue, params["param"], "Parameter value should match for %s", tc.path)
-				}
-			} else {
-				assert.False(t, found, "Route should not be found: %s", tc.path)
-			}
-		}
-	})
+	// 测试无效匹配 - 后缀不匹配
+	params = make(map[string]string)
+	_, found = tree.Find(http.MethodGet, "/users/123/settings", params)
+	assert.False(t, found, "Should not find route when static suffix doesn't match")
 }
 
-func TestOverwritingRegexRoutes(t *testing.T) {
+// 测试常用的HTTP API路由模式
+func TestCommonAPIPatterns(t *testing.T) {
 	tree := NewRadixTree()
+	handler := func() {}
 
-	// 首先添加一个路由
-	handler1 := func() {}
-	tree.Add(http.MethodGet, "/api/:version(v[0-9]+)", handler1)
+	// 注册一些常见的API路由模式
+	tree.Add(http.MethodGet, "/api/v1/users/:id([0-9]+)", handler)
+	tree.Add(http.MethodGet, "/api/v1/posts/:slug([a-z0-9-]+)", handler)
+	tree.Add(http.MethodGet, "/api/v1/products/:sku([A-Z0-9]{6})", handler)
 
-	// 然后用另一个处理器覆盖它
-	handler2 := func() { }
-	tree.Add(http.MethodGet, "/api/:version(v[0-9]+)", handler2)
-
-	// 验证被覆盖
+	// 测试用户ID路由
 	params := make(map[string]string)
-	handler, found := tree.Find(http.MethodGet, "/api/v1", params)
+	_, found := tree.Find(http.MethodGet, "/api/v1/users/42", params)
+	assert.True(t, found, "Should find user route")
+	assert.Equal(t, "42", params["id"], "Should extract correct user id")
 
-	assert.True(t, found, "Route should be found")
-	assert.Equal(t, handler2, handler, "Handler should be the overwritten one")
-	assert.Equal(t, "v1", params["version"], "Version parameter should be extracted")
+	// 测试文章slug路由
+	params = make(map[string]string)
+	_, found = tree.Find(http.MethodGet, "/api/v1/posts/my-first-post", params)
+	assert.True(t, found, "Should find post route")
+	assert.Equal(t, "my-first-post", params["slug"], "Should extract correct post slug")
 
-	// 验证总路由数仍为1
-	assert.Equal(t, 1, tree.Routes(), "There should still be only 1 route")
+	// 测试产品SKU路由
+	params = make(map[string]string)
+	_, found = tree.Find(http.MethodGet, "/api/v1/products/ABC123", params)
+	assert.True(t, found, "Should find product route")
+	assert.Equal(t, "ABC123", params["sku"], "Should extract correct product SKU")
 }

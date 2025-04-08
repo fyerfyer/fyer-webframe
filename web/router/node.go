@@ -18,7 +18,7 @@ type Node struct {
     paramChild *Node
 
     // 正则参数子节点，例如 :id([0-9]+)
-    regexChildren []*Node 
+    regexChildren []*Node
 
     // 通配符子节点，例如 *
     wildcardChild *Node
@@ -89,18 +89,38 @@ func (n *Node) Insert(path string, handler interface{}) {
             var pattern *regexp.Regexp
 
             // 提取正则表达式
-            if strings.Contains(paramName, "(") && strings.Contains(paramName, ")") {
+            if strings.Contains(paramName, "(") {
                 regexStart := strings.Index(paramName, "(")
-                regexEnd := strings.LastIndex(paramName, ")")
-
-                if regexStart > 0 && regexEnd > regexStart {
-                    regexStr := paramName[regexStart + 1:regexEnd]
-                    paramName = paramName[:regexStart]
-
-                    // 预编译正则表达式
-                    pattern = regexp.MustCompile("^" + regexStr + "$")
-                    isRegex = true
+                
+                // If there's an opening parenthesis but no closing one, panic
+                if !strings.Contains(paramName, ")") {
+                    panic(fmt.Sprintf("invalid regex pattern in '%s': missing closing parenthesis", segment))
                 }
+                
+                regexEnd := strings.LastIndex(paramName, ")")
+                
+                // The closing parenthesis must come after the opening one
+                if regexEnd <= regexStart {
+                    panic(fmt.Sprintf("invalid regex pattern in '%s': misplaced parentheses", segment))
+                }
+                
+                regexStr := paramName[regexStart + 1:regexEnd]
+                paramName = paramName[:regexStart]
+                
+                // Check for same-named parameters with different regex
+                for _, regexNode := range current.regexChildren {
+                    if regexNode.paramName == paramName && regexNode.pattern.String() != "^"+regexStr+"$" {
+                        panic(fmt.Sprintf("conflicting parameter name '%s' with different regex patterns", paramName))
+                    }
+                }
+                
+                // Try to compile the regex, should panic on failure
+                var err error
+                pattern, err = regexp.Compile("^" + regexStr + "$")
+                if err != nil {
+                    panic(fmt.Sprintf("invalid regex pattern: %s - %s", regexStr, err))
+                }
+                isRegex = true
             }
 
             // 创建或获取参数节点
@@ -216,7 +236,7 @@ func (n *Node) Find(path string, params map[string]string) (interface{}, bool) {
         if current.paramChild != nil {
             // 正常参数匹配
             params[current.paramChild.paramName] = segment
-            
+
             // 这里是关键：如果参数子节点下还有子节点并且当前不是最后一个段，
             // 我们需要继续检查之后的段能否匹配参数子节点的子节点
             if i < len(segments)-1 {
@@ -234,14 +254,14 @@ func (n *Node) Find(path string, params map[string]string) (interface{}, bool) {
                             break
                         }
                     }
-                    
+
                     if !paramChildCanMatch && current.paramChild.paramChild != nil {
                         paramChildCanMatch = true
                     } else if !paramChildCanMatch && current.paramChild.wildcardChild != nil {
                         paramChildCanMatch = true
                     }
                 }
-                
+
                 if paramChildCanMatch {
                     current = current.paramChild
                     i++
