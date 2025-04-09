@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+
+	objPool "github.com/fyerfyer/fyer-webframe/web/pool"
 )
 
 // ContentType 常用的内容类型常量
@@ -97,11 +99,21 @@ type ProblemDetails struct {
 func (c *Context) JSON(code int, data any) error {
 	c.Resp.Header().Set("Content-Type", ContentTypeJSON)
 	c.RespStatusCode = code
-	jsonData, err := json.Marshal(data)
+
+	// 获取一个响应缓冲区
+	buf := objPool.AcquireBuffer()
+	defer objPool.ReleaseBuffer(buf)
+
+	// 将数据编码到缓冲区
+	err := json.NewEncoder(buf.Buffer).Encode(data)
 	if err != nil {
 		return err
 	}
-	c.RespData = jsonData
+
+	// 复制缓冲区内容到响应数据
+	c.RespData = make([]byte, buf.Buffer.Len())
+	copy(c.RespData, buf.Buffer.Bytes())
+
 	c.unhandled = true
 	return nil
 }
@@ -110,11 +122,25 @@ func (c *Context) JSON(code int, data any) error {
 func (c *Context) XML(code int, data any) error {
 	c.Resp.Header().Set("Content-Type", ContentTypeXML)
 	c.RespStatusCode = code
-	xmlData, err := xml.MarshalIndent(data, "", "  ")
-	if err != nil {
+
+	// 获取一个响应缓冲区
+	buf := objPool.AcquireBuffer()
+	defer objPool.ReleaseBuffer(buf)
+
+	// 先写入XML头部
+	buf.Buffer.WriteString(xml.Header)
+
+	// 使用缩进格式编码XML
+	encoder := xml.NewEncoder(buf.Buffer)
+	encoder.Indent("", "  ")
+	if err := encoder.Encode(data); err != nil {
 		return err
 	}
-	c.RespData = xmlData
+
+	// 复制缓冲区内容到响应数据
+	c.RespData = make([]byte, buf.Buffer.Len())
+	copy(c.RespData, buf.Buffer.Bytes())
+
 	c.unhandled = true
 	return nil
 }
@@ -123,7 +149,18 @@ func (c *Context) XML(code int, data any) error {
 func (c *Context) String(code int, format string, values ...any) error {
 	c.Resp.Header().Set("Content-Type", ContentTypePlain)
 	c.RespStatusCode = code
-	c.RespData = []byte(fmt.Sprintf(format, values...))
+
+	// 获取一个响应缓冲区用于格式化字符串
+	buf := objPool.AcquireBuffer()
+	defer objPool.ReleaseBuffer(buf)
+
+	// 格式化字符串到缓冲区
+	fmt.Fprintf(buf.Buffer, format, values...)
+
+	// 复制缓冲区内容到响应数据
+	c.RespData = make([]byte, buf.Buffer.Len())
+	copy(c.RespData, buf.Buffer.Bytes())
+
 	c.unhandled = true
 	return nil
 }
@@ -139,16 +176,12 @@ func (c *Context) HTML(code int, html string) error {
 
 // Template 渲染模板并返回
 func (c *Context) Template(name string, data any) error {
-	//fmt.Printf("DEBUG Template: Starting render template '%s'\n", name)
-
 	if c.tplEngine == nil {
-		//fmt.Println("DEBUG Template: Template engine not set")
 		return errors.New("template engine not set")
 	}
 
 	result, err := c.tplEngine.Render(c, name, data)
 	if err != nil {
-		//fmt.Printf("DEBUG Template: Render error: %v\n", err)
 		return fmt.Errorf("failed to render template: %w", err)
 	}
 
@@ -160,14 +193,6 @@ func (c *Context) Template(name string, data any) error {
 	c.RespStatusCode = http.StatusOK
 
 	return nil
-}
-
-// 辅助函数获取最小值
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // Attachment 下载附件
@@ -253,24 +278,44 @@ func (c *Context) StreamEvent(event string, data any) error {
 	c.Resp.Header().Set("Connection", "keep-alive")
 	c.unhandled = false
 
-	// 格式化数据
-	var dataStr string
+	// 获取一个响应缓冲区
+	buf := objPool.AcquireBuffer()
+	defer objPool.ReleaseBuffer(buf)
+
+	// 格式化事件和数据
+	if event != "" {
+		fmt.Fprintf(buf.Buffer, "event: %s\n", event)
+	}
+
+	// 根据数据类型处理
 	switch v := data.(type) {
 	case string:
-		dataStr = v
+		fmt.Fprintf(buf.Buffer, "data: %s\n\n", v)
 	default:
-		jsonData, err := json.Marshal(data)
-		if err != nil {
+		// 使用JSON编码复杂对象
+		jsonBuf := objPool.AcquireBuffer()
+		defer objPool.ReleaseBuffer(jsonBuf)
+
+		if err := json.NewEncoder(jsonBuf.Buffer).Encode(data); err != nil {
 			return err
 		}
-		dataStr = string(jsonData)
+
+		// 移除尾部的换行符
+		jsonStr := jsonBuf.Buffer.String()
+		if len(jsonStr) > 0 && jsonStr[len(jsonStr)-1] == '\n' {
+			jsonStr = jsonStr[:len(jsonStr)-1]
+		}
+
+		fmt.Fprintf(buf.Buffer, "data: %s\n\n", jsonStr)
 	}
 
-	if event != "" {
-		fmt.Fprintf(c.Resp, "event: %s\n", event)
+	// 写入响应
+	_, err := c.Resp.Write(buf.Buffer.Bytes())
+	if err != nil {
+		return err
 	}
-	fmt.Fprintf(c.Resp, "data: %s\n\n", dataStr)
 
+	// 刷新响应
 	if flusher, ok := c.Resp.(http.Flusher); ok {
 		flusher.Flush()
 	}
@@ -287,28 +332,40 @@ func (c *Context) Problem(code int, problem *ProblemDetails) error {
 	// 设置状态码
 	problem.Status = code
 
+	// 获取一个响应缓冲区
+	buf := objPool.AcquireBuffer()
+	defer objPool.ReleaseBuffer(buf)
+
 	// 根据请求的 Accept 头部选择响应格式
 	accept := c.Req.Header.Get("Accept")
 	if accept == ContentTypeProblemXML {
 		c.Resp.Header().Set("Content-Type", ContentTypeProblemXML)
-		xmlData, err := xml.MarshalIndent(problem, "", "  ")
-		if err != nil {
+
+		// 使用缩进格式编码XML
+		encoder := xml.NewEncoder(buf.Buffer)
+		encoder.Indent("", "  ")
+		if err := encoder.Encode(problem); err != nil {
 			return err
 		}
+
+		// 复制缓冲区内容到响应数据
+		c.RespData = make([]byte, buf.Buffer.Len())
+		copy(c.RespData, buf.Buffer.Bytes())
 		c.RespStatusCode = code
-		c.RespData = xmlData
 		c.unhandled = true
 		return nil
 	}
 
 	// 默认数据类型为JSON
 	c.Resp.Header().Set("Content-Type", ContentTypeProblemJSON)
-	jsonData, err := json.Marshal(problem)
-	if err != nil {
+	if err := json.NewEncoder(buf.Buffer).Encode(problem); err != nil {
 		return err
 	}
+
+	// 复制缓冲区内容到响应数据
+	c.RespData = make([]byte, buf.Buffer.Len())
+	copy(c.RespData, buf.Buffer.Bytes())
 	c.RespStatusCode = code
-	c.RespData = jsonData
 	c.unhandled = true
 	return nil
 }

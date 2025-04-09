@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/fyerfyer/fyer-kit/pool"
+	objPool "github.com/fyerfyer/fyer-webframe/web/pool"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -28,7 +29,95 @@ type Context struct {
 	UserValues     map[string]any      // 用户自定义值存储
 	Context        context.Context     // 标准上下文对象
 	aborted        bool                // 标记是否终止处理
-	poolManager    pool.PoolManager    // 连接池管理器
+	poolManager    pool.PoolManager    // 连接池管理器 (注意：这不是对象池)
+}
+
+// Reset 重置Context对象以便重用
+// 实现objPool.Poolable接口
+func (c *Context) Reset() {
+	// 清空核心字段
+	c.Req = nil
+	c.Resp = nil
+	c.Context = nil
+	c.RespStatusCode = 0
+	c.RespData = nil
+	c.RouteURL = ""
+	c.unhandled = true
+	c.aborted = false
+
+	// 清空路由参数映射但不重新分配
+	for k := range c.Param {
+		delete(c.Param, k)
+	}
+
+	// 清空用户值但不重新分配
+	for k := range c.UserValues {
+		delete(c.UserValues, k)
+	}
+
+	// 保留模板引擎和连接池管理器引用，这些不需要重置
+}
+
+// SetRequest 设置请求对象，用于对象池重用时
+func (c *Context) SetRequest(req *http.Request) {
+	c.Req = req
+	if req != nil {
+		c.Context = req.Context()
+	}
+}
+
+// SetResponse 设置响应写入器，用于对象池重用时
+func (c *Context) SetResponse(resp http.ResponseWriter) {
+	c.Resp = resp
+}
+
+// newContextForPool 创建一个新的Context，用于对象池
+func newContextForPool(opts objPool.CtxOptions) interface{} {
+	paramCap := 8 // 默认参数容量
+	if opts.ParamCapacity > 0 {
+		paramCap = opts.ParamCapacity
+	}
+
+	ctx := &Context{
+		Param:      make(map[string]string, paramCap),
+		UserValues: make(map[string]any, paramCap),
+		unhandled:  true,
+	}
+
+	// 只在tplEngine非空时进行类型断言
+	if opts.TplEngine != nil {
+		ctx.tplEngine = opts.TplEngine.(Template)
+	}
+
+	if opts.PoolManager != nil {
+		ctx.poolManager = opts.PoolManager.(pool.PoolManager)
+	}
+
+	return ctx
+}
+
+// InitContextPool 初始化Context对象池
+func InitContextPool(tplEngine Template, connPoolManager pool.PoolManager, paramCap int) {
+	opts := objPool.CtxOptions{
+		TplEngine:     tplEngine,
+		PoolManager:   connPoolManager,
+		ParamCapacity: paramCap,
+	}
+
+	objPool.InitDefaultContextPool(newContextForPool, opts)
+}
+
+// AcquireContext 从池中获取一个Context对象
+func AcquireContext(req *http.Request, resp http.ResponseWriter) *Context {
+	ctx := objPool.AcquireContext(req, resp).(*Context)
+	return ctx
+}
+
+// ReleaseContext 将Context对象返回到池中
+func ReleaseContext(ctx *Context) {
+	if ctx != nil {
+		objPool.ReleaseContext(ctx)
+	}
 }
 
 // Abort 终止当前请求的处理流程
@@ -53,7 +142,7 @@ func (c *Context) Next(next HandlerFunc) {
 // BindJSON 将请求体绑定到JSON结构体
 func (c *Context) BindJSON(v any) error {
 	if c.Req.Body == nil {
-		return errors.New("缺少请求体")
+		return errors.New("request body is empty")
 	}
 	return json.NewDecoder(c.Req.Body).Decode(v)
 }
@@ -61,7 +150,7 @@ func (c *Context) BindJSON(v any) error {
 // BindXML 将请求体绑定到XML结构体
 func (c *Context) BindXML(v any) error {
 	if c.Req.Body == nil {
-		return errors.New("缺少请求体")
+		return errors.New("request body is empty")
 	}
 	return xml.NewDecoder(c.Req.Body).Decode(v)
 }
@@ -69,7 +158,7 @@ func (c *Context) BindXML(v any) error {
 // ReadBody 读取请求体的字节内容
 func (c *Context) ReadBody() ([]byte, error) {
 	if c.Req.Body == nil {
-		return nil, errors.New("缺少请求体")
+		return nil, errors.New("request body is empty")
 	}
 	defer c.Req.Body.Close()
 	return io.ReadAll(c.Req.Body)
@@ -113,11 +202,11 @@ type BoolValue struct {
 func (c *Context) FormValue(key string) StringValue {
 	err := c.Req.ParseForm()
 	if err != nil {
-		return StringValue{Error: fmt.Errorf("解析表单失败: %w", err)}
+		return StringValue{Error: fmt.Errorf("failed to parse form value: %w", err)}
 	}
 	val := c.Req.FormValue(key)
 	if val == "" {
-		return StringValue{Error: errors.New("未找到对应的键")}
+		return StringValue{Error: errors.New("key not found")}
 	}
 	return StringValue{Value: val}
 }
@@ -130,7 +219,7 @@ func (c *Context) FormInt(key string) IntValue {
 	}
 	val, err := strconv.Atoi(sv.Value)
 	if err != nil {
-		return IntValue{Error: fmt.Errorf("值不是整数: %w", err)}
+		return IntValue{Error: fmt.Errorf("invalid int value: %w", err)}
 	}
 	return IntValue{Value: val}
 }
@@ -143,7 +232,7 @@ func (c *Context) FormInt64(key string) Int64Value {
 	}
 	val, err := strconv.ParseInt(sv.Value, 10, 64)
 	if err != nil {
-		return Int64Value{Error: fmt.Errorf("值不是整数: %w", err)}
+		return Int64Value{Error: fmt.Errorf("invalid int value: %w", err)}
 	}
 	return Int64Value{Value: val}
 }
@@ -156,7 +245,7 @@ func (c *Context) FormFloat(key string) FloatValue {
 	}
 	val, err := strconv.ParseFloat(sv.Value, 64)
 	if err != nil {
-		return FloatValue{Error: fmt.Errorf("值不是浮点数: %w", err)}
+		return FloatValue{Error: fmt.Errorf("invalid float value: %w", err)}
 	}
 	return FloatValue{Value: val}
 }
@@ -169,7 +258,7 @@ func (c *Context) FormBool(key string) BoolValue {
 	}
 	val, err := strconv.ParseBool(sv.Value)
 	if err != nil {
-		return BoolValue{Error: fmt.Errorf("值不是布尔类型: %w", err)}
+		return BoolValue{Error: fmt.Errorf("invalid bool value: %w", err)}
 	}
 	return BoolValue{Value: val}
 }
@@ -178,7 +267,7 @@ func (c *Context) FormBool(key string) BoolValue {
 func (c *Context) FormAll() (url.Values, error) {
 	err := c.Req.ParseForm()
 	if err != nil {
-		return nil, fmt.Errorf("解析表单失败: %w", err)
+		return nil, fmt.Errorf("failed to parse form value: %w", err)
 	}
 	return c.Req.Form, nil
 }
@@ -189,7 +278,7 @@ func (c *Context) FormAll() (url.Values, error) {
 func (c *Context) FormFile(key string) (*multipart.FileHeader, error) {
 	err := c.Req.ParseMultipartForm(32 << 20) // 32MB
 	if err != nil {
-		return nil, fmt.Errorf("解析多部分表单失败: %w", err)
+		return nil, fmt.Errorf("failed to parse multipart form file: %w", err)
 	}
 	file, header, err := c.Req.FormFile(key)
 	if err != nil {
@@ -203,15 +292,15 @@ func (c *Context) FormFile(key string) (*multipart.FileHeader, error) {
 func (c *Context) FormFiles(key string) ([]*multipart.FileHeader, error) {
 	err := c.Req.ParseMultipartForm(32 << 20) // 32MB
 	if err != nil {
-		return nil, fmt.Errorf("解析多部分表单失败: %w", err)
+		return nil, fmt.Errorf("failed to parse multipart form file: %w", err)
 	}
 	form := c.Req.MultipartForm
 	if form == nil || form.File == nil {
-		return nil, errors.New("未找到文件")
+		return nil, errors.New("file not found")
 	}
 	files := form.File[key]
 	if len(files) == 0 {
-		return nil, fmt.Errorf("未找到键为 %s 的文件", key)
+		return nil, fmt.Errorf("cannot found file with key: %s", key)
 	}
 	return files, nil
 }
@@ -222,7 +311,7 @@ func (c *Context) FormFiles(key string) ([]*multipart.FileHeader, error) {
 func (c *Context) QueryParam(key string) StringValue {
 	val := c.Req.URL.Query().Get(key)
 	if val == "" {
-		return StringValue{Error: errors.New("未找到对应的键")}
+		return StringValue{Error: errors.New("key not found")}
 	}
 	return StringValue{Value: val}
 }
@@ -235,7 +324,7 @@ func (c *Context) QueryInt(key string) IntValue {
 	}
 	val, err := strconv.Atoi(sv.Value)
 	if err != nil {
-		return IntValue{Error: fmt.Errorf("值不是整数: %w", err)}
+		return IntValue{Error: fmt.Errorf("invalid int value: %w", err)}
 	}
 	return IntValue{Value: val}
 }
@@ -248,7 +337,7 @@ func (c *Context) QueryInt64(key string) Int64Value {
 	}
 	val, err := strconv.ParseInt(sv.Value, 10, 64)
 	if err != nil {
-		return Int64Value{Error: fmt.Errorf("值不是整数: %w", err)}
+		return Int64Value{Error: fmt.Errorf("invalid int value: %w", err)}
 	}
 	return Int64Value{Value: val}
 }
@@ -261,7 +350,7 @@ func (c *Context) QueryFloat(key string) FloatValue {
 	}
 	val, err := strconv.ParseFloat(sv.Value, 64)
 	if err != nil {
-		return FloatValue{Error: fmt.Errorf("值不是浮点数: %w", err)}
+		return FloatValue{Error: fmt.Errorf("invalid float value: %w", err)}
 	}
 	return FloatValue{Value: val}
 }
@@ -274,7 +363,7 @@ func (c *Context) QueryBool(key string) BoolValue {
 	}
 	val, err := strconv.ParseBool(sv.Value)
 	if err != nil {
-		return BoolValue{Error: fmt.Errorf("值不是布尔类型: %w", err)}
+		return BoolValue{Error: fmt.Errorf("invalid bool value: %w", err)}
 	}
 	return BoolValue{Value: val}
 }
@@ -290,7 +379,7 @@ func (c *Context) QueryAll() url.Values {
 func (c *Context) PathParam(key string) StringValue {
 	val, ok := c.Param[key]
 	if !ok {
-		return StringValue{Error: errors.New("未找到对应的键")}
+		return StringValue{Error: errors.New("key not found")}
 	}
 	return StringValue{Value: val}
 }
@@ -303,7 +392,7 @@ func (c *Context) PathInt(key string) IntValue {
 	}
 	val, err := strconv.Atoi(sv.Value)
 	if err != nil {
-		return IntValue{Error: fmt.Errorf("值不是整数: %w", err)}
+		return IntValue{Error: fmt.Errorf("invalid int value: %w", err)}
 	}
 	return IntValue{Value: val}
 }
@@ -316,7 +405,7 @@ func (c *Context) PathInt64(key string) Int64Value {
 	}
 	val, err := strconv.ParseInt(sv.Value, 10, 64)
 	if err != nil {
-		return Int64Value{Error: fmt.Errorf("值不是整数: %w", err)}
+		return Int64Value{Error: fmt.Errorf("invalid int value: %w", err)}
 	}
 	return Int64Value{Value: val}
 }
@@ -329,7 +418,7 @@ func (c *Context) PathFloat(key string) FloatValue {
 	}
 	val, err := strconv.ParseFloat(sv.Value, 64)
 	if err != nil {
-		return FloatValue{Error: fmt.Errorf("值不是浮点数: %w", err)}
+		return FloatValue{Error: fmt.Errorf("invalid float value: %w", err)}
 	}
 	return FloatValue{Value: val}
 }
@@ -342,7 +431,7 @@ func (c *Context) PathBool(key string) BoolValue {
 	}
 	val, err := strconv.ParseBool(sv.Value)
 	if err != nil {
-		return BoolValue{Error: fmt.Errorf("值不是布尔类型: %w", err)}
+		return BoolValue{Error: fmt.Errorf("invalid float value: %w", err)}
 	}
 	return BoolValue{Value: val}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/fyerfyer/fyer-kit/pool"
+	objPool "github.com/fyerfyer/fyer-webframe/web/pool"
 )
 
 // Server 接口定义
@@ -49,6 +50,8 @@ type HTTPServer struct {
 	baseRoute   string           // 基础路由前缀
 	tplEngine   Template         // 模板引擎
 	poolManager pool.PoolManager // 连接池管理器
+	useObjPool  bool             // 是否使用对象池
+	paramCap    int              // 参数映射的初始容量
 }
 
 // ServerOption 定义服务器选项
@@ -96,6 +99,16 @@ func WithPoolManager(manager pool.PoolManager) ServerOption {
 	}
 }
 
+// WithObjectPool 启用对象池以减少GC压力
+func WithObjectPool(paramCap int) ServerOption {
+	return func(server *HTTPServer) {
+		server.useObjPool = true
+		if paramCap > 0 {
+			server.paramCap = paramCap
+		}
+	}
+}
+
 // NewHTTPServer 创建HTTP服务器实例
 func NewHTTPServer(opts ...ServerOption) *HTTPServer {
 	server := &HTTPServer{
@@ -105,6 +118,7 @@ func NewHTTPServer(opts ...ServerOption) *HTTPServer {
 			ctx.Resp.WriteHeader(http.StatusNotFound)
 			ctx.Resp.Write([]byte("404 Not Found"))
 		},
+		paramCap: 8, // 默认参数容量
 	}
 
 	// 应用所有选项
@@ -117,33 +131,55 @@ func NewHTTPServer(opts ...ServerOption) *HTTPServer {
 	return server
 }
 
+// initObjectPool 初始化对象池
+func (s *HTTPServer) initObjectPool() {
+	if s.useObjPool && objPool.DefaultContextPool == nil {
+		InitContextPool(s.tplEngine, s.poolManager, s.paramCap)
+	}
+}
+
 // ServeHTTP HTTPServer的核心处理函数
 func (s *HTTPServer) ServeHTTP(res http.ResponseWriter, req *http.Request) {
-	ctx := &Context{
-		Req:         req,
-		Resp:        res,
-		Param:       make(map[string]string),
-		tplEngine:   s.tplEngine,
-		Context:     req.Context(),
-		unhandled:   true,
-		UserValues:  make(map[string]any),
-		poolManager: s.poolManager, // 注入连接池管理器
+	// 确保对象池已初始化
+	s.initObjectPool()
+
+	var ctx *Context
+	// 使用对象池创建上下文
+	if s.useObjPool && objPool.DefaultContextPool != nil {
+		ctx = AcquireContext(req, res)
+	} else {
+		// 不使用对象池时，直接创建
+		ctx = &Context{
+			Req:         req,
+			Resp:        res,
+			Param:       make(map[string]string, s.paramCap),
+			tplEngine:   s.tplEngine,
+			Context:     req.Context(),
+			unhandled:   true,
+			UserValues:  make(map[string]any, s.paramCap),
+			poolManager: s.poolManager,
+		}
+	}
+
+	// 在函数返回时释放对象（如果使用了对象池）
+	if s.useObjPool && objPool.DefaultContextPool != nil {
+		defer ReleaseContext(ctx)
 	}
 
 	// 如果设置了基础路径，需要处理路径前缀
 	originalPath := req.URL.Path
 	path := originalPath
 
-	// Check if the request path starts with the base route
+	// 检查请求路径是否以基础路由开头
 	if s.baseRoute != "" {
 		if len(path) >= len(s.baseRoute) && path[:len(s.baseRoute)] == s.baseRoute {
-			// Strip base path for routing
+			// 剥离基础路径
 			path = path[len(s.baseRoute):]
 			if path == "" {
 				path = "/"
 			}
 		} else {
-			// If base route is set but the path doesn't start with it, return 404
+			// 如果设置了基础路由但路径不匹配，返回404
 			s.noRouter(ctx)
 			s.handleResponse(ctx)
 			return
@@ -195,6 +231,9 @@ func (s *HTTPServer) handleResponse(ctx *Context) {
 
 // Start 启动服务器
 func (s *HTTPServer) Start(addr string) error {
+	// 确保对象池已初始化
+	s.initObjectPool()
+
 	listen, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -284,6 +323,15 @@ func (s *HTTPServer) PoolManager() pool.PoolManager {
 // SetPoolManager 设置连接池管理器
 func (s *HTTPServer) SetPoolManager(manager pool.PoolManager) {
 	s.poolManager = manager
+}
+
+// EnableObjectPool 启用对象池功能
+func (s *HTTPServer) EnableObjectPool(paramCap int) {
+	s.useObjPool = true
+	if paramCap > 0 {
+		s.paramCap = paramCap
+	}
+	s.initObjectPool()
 }
 
 // routeRegister 实现RouteRegister接口
