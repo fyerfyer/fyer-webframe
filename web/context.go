@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/fyerfyer/fyer-kit/pool"
+	"github.com/fyerfyer/fyer-webframe/web/logger"
 	objPool "github.com/fyerfyer/fyer-webframe/web/pool"
 	"io"
 	"mime/multipart"
@@ -14,6 +15,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Context 表示HTTP请求和响应的上下文信息
@@ -30,6 +32,7 @@ type Context struct {
 	Context        context.Context     // 标准上下文对象
 	aborted        bool                // 标记是否终止处理
 	poolManager    pool.PoolManager    // 连接池管理器 (注意：这不是对象池)
+	logger         logger.Logger       // 请求级别日志记录器
 }
 
 // Reset 重置Context对象以便重用
@@ -44,6 +47,7 @@ func (c *Context) Reset() {
 	c.RouteURL = ""
 	c.unhandled = true
 	c.aborted = false
+	c.logger = nil // 重置日志记录器
 
 	// 清空路由参数映射但不重新分配
 	for k := range c.Param {
@@ -63,6 +67,19 @@ func (c *Context) SetRequest(req *http.Request) {
 	c.Req = req
 	if req != nil {
 		c.Context = req.Context()
+
+		// 为新请求设置日志记录器并添加请求信息
+		if c.logger != nil {
+			reqID := req.Header.Get("X-Request-ID")
+			if reqID == "" {
+				reqID = fmt.Sprintf("%s-%d", req.URL.Path, time.Now().UnixNano())
+			}
+
+			// 创建包含请求ID的日志记录器
+			c.logger = c.logger.WithField("request_id", reqID).
+				WithField("method", req.Method).
+				WithField("path", req.URL.Path)
+		}
 	}
 }
 
@@ -82,6 +99,7 @@ func newContextForPool(opts objPool.CtxOptions) interface{} {
 		Param:      make(map[string]string, paramCap),
 		UserValues: make(map[string]any, paramCap),
 		unhandled:  true,
+		logger:     logger.GetDefaultLogger(), // 使用默认日志记录器
 	}
 
 	// 只在tplEngine非空时进行类型断言
@@ -94,6 +112,43 @@ func newContextForPool(opts objPool.CtxOptions) interface{} {
 	}
 
 	return ctx
+}
+
+// Logger 获取上下文关联的日志记录器
+func (c *Context) Logger() logger.Logger {
+	// 如果没有设置日志记录器，返回全局默认记录器
+	if c.logger == nil {
+		c.logger = logger.GetDefaultLogger()
+
+		// 如果请求对象存在，添加请求信息
+		if c.Req != nil {
+			reqID := c.Req.Header.Get("X-Request-ID")
+			if reqID == "" {
+				reqID = fmt.Sprintf("%s-%d", c.Req.URL.Path, time.Now().UnixNano())
+			}
+
+			c.logger = c.logger.WithField("request_id", reqID).
+				WithField("method", c.Req.Method).
+				WithField("path", c.Req.URL.Path)
+		}
+	}
+	return c.logger
+}
+
+// SetLogger 设置上下文关联的日志记录器
+func (c *Context) SetLogger(l logger.Logger) {
+	c.logger = l
+}
+
+// Log 方便的日志记录方法，默认使用Info级别
+func (c *Context) Log(msg string, fields ...logger.Field) {
+	c.Logger().Info(msg, fields...)
+}
+
+// LogError 方便的错误日志记录方法
+func (c *Context) LogError(msg string, err error, fields ...logger.Field) {
+	allFields := append([]logger.Field{logger.FieldError(err)}, fields...)
+	c.Logger().Error(msg, allFields...)
 }
 
 // InitContextPool 初始化Context对象池

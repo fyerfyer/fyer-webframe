@@ -1,0 +1,35 @@
+html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.title}}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+    <h1>{{.title}}</h1>
+    <p>{{.message}}</p>
+    <p>当前时间: {{.time}}</p>
+
+    <h2>日志演示链接</h2>
+    <ul>
+        <li><a href="/">首页 (Info 级别日志)</a></li>
+        <li><a href="/debug">调试页面 (Debug 级别日志)</a></li>
+        <li><a href="/api/info">API信息 (Info + Debug 级别日志)</a></li>
+        <li><a href="/api/error">模拟错误 (Error 级别日志)</a></li>
+        <li><a href="/api/panic">模拟致命错误 (Fatal 级别日志)</a></li>
+        <li><a href="/admin">管理页面 (特殊中间件日志)</a></li>
+    </ul>
+
+    <h2>使用POST测试</h2>
+    <p>用下面的cURL命令测试用户创建日志:</p>
+    <pre>
+curl -X POST http://localhost:8080/api/users \
+    -H "Content-Type: application/json" \
+    -d '{"username":"testuser","email":"test@example.com"}'
+        </pre>
+</div>
+</body>
+</html>

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/fyerfyer/fyer-kit/pool"
+	"github.com/fyerfyer/fyer-webframe/web/logger"
 	objPool "github.com/fyerfyer/fyer-webframe/web/pool"
 )
 
@@ -33,6 +34,9 @@ type Server interface {
 	// 模板引擎
 	UseTemplate(tpl Template) Server
 	GetTemplateEngine() Template
+
+	// 日志记录器
+	Logger() logger.Logger
 }
 
 // RouteRegister 路由链式注册接口
@@ -52,6 +56,7 @@ type HTTPServer struct {
 	poolManager pool.PoolManager // 连接池管理器
 	useObjPool  bool             // 是否使用对象池
 	paramCap    int              // 参数映射的初始容量
+	logger      logger.Logger    // 日志记录器
 }
 
 // ServerOption 定义服务器选项
@@ -109,6 +114,13 @@ func WithObjectPool(paramCap int) ServerOption {
 	}
 }
 
+// WithLogger 设置服务器日志记录器
+func WithLogger(log logger.Logger) ServerOption {
+	return func(server *HTTPServer) {
+		server.logger = log
+	}
+}
+
 // NewHTTPServer 创建HTTP服务器实例
 func NewHTTPServer(opts ...ServerOption) *HTTPServer {
 	server := &HTTPServer{
@@ -118,7 +130,8 @@ func NewHTTPServer(opts ...ServerOption) *HTTPServer {
 			ctx.Resp.WriteHeader(http.StatusNotFound)
 			ctx.Resp.Write([]byte("404 Not Found"))
 		},
-		paramCap: 8, // 默认参数容量
+		paramCap: 8,                     // 默认参数容量
+		logger:   logger.GetDefaultLogger(), // 使用默认日志记录器
 	}
 
 	// 应用所有选项
@@ -129,6 +142,11 @@ func NewHTTPServer(opts ...ServerOption) *HTTPServer {
 	// 设置 http.Server 的处理器为当前实例
 	server.server.Handler = server
 	return server
+}
+
+// Logger 返回服务器的日志记录器
+func (s *HTTPServer) Logger() logger.Logger {
+	return s.logger
 }
 
 // initObjectPool 初始化对象池
@@ -143,10 +161,25 @@ func (s *HTTPServer) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	// 确保对象池已初始化
 	s.initObjectPool()
 
+	// 记录请求开始
+	reqID := req.Header.Get("X-Request-ID")
+	if reqID == "" {
+		reqID = req.URL.Path + "-" + time.Now().Format(time.RFC3339Nano)
+	}
+
+	requestLog := s.logger.WithField("request_id", reqID).
+		WithField("method", req.Method).
+		WithField("path", req.URL.Path).
+		WithField("client_ip", req.RemoteAddr)
+
+	requestLog.Info("Request started")
+	startTime := time.Now()
+
 	var ctx *Context
 	// 使用对象池创建上下文
 	if s.useObjPool && objPool.DefaultContextPool != nil {
 		ctx = AcquireContext(req, res)
+		ctx.SetLogger(requestLog) // 设置请求级别日志记录器
 	} else {
 		// 不使用对象池时，直接创建
 		ctx = &Context{
@@ -158,6 +191,7 @@ func (s *HTTPServer) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 			unhandled:   true,
 			UserValues:  make(map[string]any, s.paramCap),
 			poolManager: s.poolManager,
+			logger:      requestLog, // 设置请求级别日志记录器
 		}
 	}
 
@@ -180,8 +214,10 @@ func (s *HTTPServer) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 			}
 		} else {
 			// 如果设置了基础路由但路径不匹配，返回404
+			requestLog.Info("Path doesn't match base route", logger.String("base_route", s.baseRoute))
 			s.noRouter(ctx)
 			s.handleResponse(ctx)
+			s.logRequestCompletion(requestLog, startTime, http.StatusNotFound)
 			return
 		}
 	}
@@ -189,8 +225,10 @@ func (s *HTTPServer) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	// 查找路由
 	node, ok := s.findHandler(req.Method, path, ctx)
 	if !ok {
+		requestLog.Info("Route not found", logger.String("method", req.Method), logger.String("path", path))
 		s.noRouter(ctx)
 		s.handleResponse(ctx)
+		s.logRequestCompletion(requestLog, startTime, http.StatusNotFound)
 		return
 	}
 
@@ -200,6 +238,29 @@ func (s *HTTPServer) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 
 	// 处理响应
 	s.handleResponse(ctx)
+
+	// 记录请求完成
+	s.logRequestCompletion(requestLog, startTime, ctx.RespStatusCode)
+}
+
+// logRequestCompletion 记录请求完成的日志
+func (s *HTTPServer) logRequestCompletion(requestLog logger.Logger, startTime time.Time, statusCode int) {
+	duration := time.Since(startTime)
+
+	// 根据状态码选择日志级别
+	if statusCode >= 500 {
+		requestLog.Error("Request completed with server error",
+			logger.Int("status", statusCode),
+			logger.Int64("duration_ms", duration.Milliseconds()))
+	} else if statusCode >= 400 {
+		requestLog.Warn("Request completed with client error",
+			logger.Int("status", statusCode),
+			logger.Int64("duration_ms", duration.Milliseconds()))
+	} else {
+		requestLog.Info("Request completed successfully",
+			logger.Int("status", statusCode),
+			logger.Int64("duration_ms", duration.Milliseconds()))
+	}
 }
 
 // handleResponse 统一处理响应
@@ -221,6 +282,9 @@ func (s *HTTPServer) handleResponse(ctx *Context) {
 	if len(ctx.RespData) > 0 {
 		_, err := ctx.Resp.Write(ctx.RespData)
 		if err != nil {
+			// 记录写入响应失败的错误
+			ctx.Logger().Error("Failed to write response", logger.FieldError(err))
+
 			// 尝试写入一个错误响应（如果我们还没有开始写入）
 			if ctx.RespStatusCode < 400 {
 				http.Error(ctx.Resp, "Internal Server Error", http.StatusInternalServerError)
@@ -234,28 +298,43 @@ func (s *HTTPServer) Start(addr string) error {
 	// 确保对象池已初始化
 	s.initObjectPool()
 
+	s.logger.Info("Starting HTTP server", logger.String("address", addr))
+
 	listen, err := net.Listen("tcp", addr)
 	if err != nil {
+		s.logger.Error("Failed to create listener", logger.FieldError(err))
 		return err
 	}
 
 	s.start = true
 	s.server.Addr = addr
+	s.logger.Info("HTTP server listening", logger.String("address", addr))
 	return s.server.Serve(listen)
 }
 
 // Shutdown 优雅关闭
 func (s *HTTPServer) Shutdown(ctx context.Context) error {
+	s.logger.Info("Shutting down HTTP server")
 	s.start = false
 
 	// 关闭连接池管理器
 	if s.poolManager != nil {
+		s.logger.Info("Shutting down pool manager")
 		if err := s.poolManager.Shutdown(ctx); err != nil {
+			s.logger.Error("Failed to shutdown pool manager", logger.FieldError(err))
 			return err
 		}
+		s.logger.Info("Pool manager shutdown complete")
 	}
 
-	return s.server.Shutdown(ctx)
+	s.logger.Info("Shutting down HTTP server connections")
+	err := s.server.Shutdown(ctx)
+	if err != nil {
+		s.logger.Error("Error during server shutdown", logger.FieldError(err))
+	} else {
+		s.logger.Info("HTTP server shutdown complete")
+	}
+	return err
 }
 
 // Get 注册GET路由
