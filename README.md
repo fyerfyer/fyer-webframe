@@ -111,64 +111,68 @@ admin.Get("/stats", getStats)
 
 ## 性能
 
-WebFrame 各模块的基准测试结果如下：
-
 ### 路由性能
 
-```
-BenchmarkRouter_StaticRoutes-4          1,698,499    797.6 ns/op
-BenchmarkRouter_ParamRoutes-4             696,019    1543 ns/op
-BenchmarkRouter_WildcardRoutes-4        1,365,712    876.0 ns/op
-BenchmarkRouter_RegexRoutes-4             715,665    1786 ns/op
-```
+| 测试场景 | 性能数据 | 说明 |
+|---------|---------|------|
+| 静态路由 | 797.6 ns/op | 用于处理固定路径的路由 |
+| 参数路由 | 1543 ns/op | 处理包含参数的路由如 `/users/:id` |
+| 通配符路由 | 876.0 ns/op | 处理包含通配符的路由如 `/api/*` |
+| 正则路由 | 1786 ns/op | 处理包含正则表达式的复杂路由 |
+
 
 ### 中间件性能
 
-```
-BenchmarkNoMiddleware-4                 632,286    1890 ns/op
-BenchmarkSingleMiddleware-4             501,854    2078 ns/op
-BenchmarkMultipleMiddleware-4           398,611    3207 ns/op
-BenchmarkComplexMiddlewareStack-4       239,594    4949 ns/op
-```
+| 测试场景 | 性能数据 | 说明 |
+|---------|---------|------|
+| 无中间件 | 1890 ns/op | 基准参考，无中间件处理 |
+| 单一中间件 | 2078 ns/op | 使用一个中间件的性能影响 |
+| 多个中间件 | 3207 ns/op | 使用多个中间件的堆叠性能 |
+| 复杂中间件栈 | 4949 ns/op | 复杂中间件链处理的性能表现 |
+
 
 ### 并发性能
 
-```
-BenchmarkConcurrentRequests/SimpleText_Concurrent10-4     12,584    84,742 ns/op
-BenchmarkConcurrentRequests/SimpleText_Concurrent50-4      3,891   312,059 ns/op
-BenchmarkConcurrentRequests/SimpleText_Concurrent100-4     1,952   606,473 ns/op
-```
+| 测试场景 | 性能数据 | 说明 |
+|---------|---------|------|
+| 10并发 | 84,742 ns/op | 低并发下的处理能力 |
+| 50并发 | 312,059 ns/op | 中等并发下的处理能力 |
+| 100并发 | 606,473 ns/op | 高并发下的处理能力 |
+
 
 ### 内容处理性能
 
-```
-BenchmarkContextJSON-4             2,011,242    716.1 ns/op
-BenchmarkContextXML-4                237,769    6124 ns/op
-BenchmarkContextString-4           3,662,016    345.1 ns/op
-```
+| 响应类型 | 性能数据 | 说明 |
+|---------|---------|------|
+| JSON响应 | 716.1 ns/op | API常用的JSON格式响应 |
+| XML响应 | 6124 ns/op | XML格式响应处理 |
+| 字符串响应 | 345.1 ns/op | 纯文本响应，性能最佳 |
 
 ### 静态资源性能
 
-```
-BenchmarkStaticResource/SmallFile_WithCache-4       3,864    304,397 ns/op    33.64 MB/s
-BenchmarkStaticResource/MediumFile_WithCache-4      1,819    697,892 ns/op   146.73 MB/s
-BenchmarkStaticResource/LargeFile_WithCache-4         194  5,208,565 ns/op   201.32 MB/s
-```
+| 文件大小 | 性能数据 | 吞吐量 | 说明 |
+|---------|---------|-------|------|
+| 小型文件 | 304,397 ns/op | 33.64 MB/s | 带缓存的小文件处理 |
+| 中型文件 | 697,892 ns/op | 146.73 MB/s | 带缓存的中型文件处理 |
+| 大型文件 | 5,208,565 ns/op | 201.32 MB/s | 带缓存的大型文件处理 |
 
-### ORM 性能
 
-```
-BenchmarkSelectNoCache-4                   1,050    1,100,821 ns/op
-BenchmarkSelectWithCache-4                 3,656      334,870 ns/op
-BenchmarkModelInsert-4                       100   18,020,604 ns/op
-BenchmarkModelBatchInsert-4                8,881      219,231 ns/op
-BenchmarkConcurrentBatchInsert-4          12,687      130,715 ns/op
-BenchmarkQueryById-4                       2,232      539,909 ns/op
-BenchmarkQueryWithComplexCondition-4       1,570      764,017 ns/op
-BenchmarkTransactionBatchOperations-4        369    4,699,809 ns/op
-```
+### ORM性能
+
+| 测试场景 | 性能数据 | 说明 |
+|---------|---------|------|
+| 无缓存查询 | 1,100,821 ns/op | 基准查询性能 |
+| 缓存查询 | 334,870 ns/op | 启用缓存的查询性能，提升约3.3倍 |
+| 单条插入 | 18,020,604 ns/op | 单条记录插入性能 |
+| 批量插入 | 219,231 ns/op | 批量记录插入，比单条快约82倍 |
+| 并发批量插入 | 130,715 ns/op | 并发批量插入，比普通批量快约1.7倍 |
+| ID查询 | 539,909 ns/op | 按主键ID查询的性能 |
+| 复杂条件查询 | 764,017 ns/op | 复杂查询条件的性能表现 |
+| 事务批量操作 | 4,699,809 ns/op | 事务内的批量操作性能 |
 
 ORM 模块的缓存机制能将查询性能提升约 3.3 倍（334,870 vs 1,100,821 ns/op）；批量操作比单条操作效率高约 82 倍（219,231 vs 18,020,604 ns/op），而并发批量插入则进一步将性能提升至非并发版本的约 1.7 倍。
+
+> 注：以上性能测试在Intel Core i5-4310U CPU @ 2.00GHz, Windows环境下进行，实际性能可能因硬件配置、网络环境和系统负载而有所不同。
 
 ## 项目结构
 
