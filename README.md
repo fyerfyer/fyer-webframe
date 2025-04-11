@@ -2,6 +2,8 @@
 
 WebFrame 是一个高性能、功能丰富的 Go Web 框架，提供完整的 Web 应用开发解决方案，包括路由管理、中间件系统、ORM、模板引擎和请求处理等核心功能。
 
+**文档**：[fyer-webframe文档](https://fyerfyer.github.io/fyer-webframe)
+
 ## 安装
 
 ```bash
@@ -205,3 +207,7 @@ cmd/            - 命令行工具
 ## 许可证
 
 本项目采用 MIT 许可证
+
+-------
+
+详细文档请访问：[fyer-webframe文档](https://fyerfyer.github.io/fyer-webframe)
